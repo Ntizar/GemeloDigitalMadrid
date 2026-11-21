@@ -248,6 +248,9 @@ function prepararEscena() {
   const t = document.getElementById("chk-3d").checked;
   mapa.setLayoutProperty("edificios-3d", "visibility", t ? "visible" : "none");
   aplicarTerreno(document.getElementById("chk-terreno").checked);
+  contar();
+  setTimeout(contar, 1200);
+  setTimeout(contar, 3500);
   document.getElementById("leyenda").hidden = !(t && document.getElementById("chk-altura").checked);
 }
 
@@ -302,6 +305,7 @@ function pintarZoom() {
 mapa.on("load", () => { prepararEscena(); pintarZoom(); });
 mapa.on("moveend", pintarZoom);
 mapa.on("idle", contar);
+mapa.on("sourcedata", (e) => { if (e.sourceId === "openmaptiles" && e.isSourceLoaded) contar(); });
 mapa.on("moveend", contar);
 mapa.on("move", () => {
   document.getElementById("c-zoom").textContent =
