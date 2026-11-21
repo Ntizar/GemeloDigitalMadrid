@@ -282,7 +282,7 @@ mapa.on("idle", () => { if (!mapa.getLayer("edificios-3d")) prepararEscena(); })
 /* ---------- cifras en vivo: se cuentan del dato dibujado ---------- */
 let pendiente = null;
 function contar() {
-  if (!mapa.loaded() || !mapa.getLayer("edificios-3d") ||
+  if (!mapa.getLayer("edificios-3d") ||
       mapa.getLayoutProperty("edificios-3d", "visibility") === "none") {
     document.getElementById("c-edificios").textContent = "—";
     document.getElementById("c-altura").textContent = "—";
