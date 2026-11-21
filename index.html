@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gemelo Digital Madrid · ciudad 3D desde datos abiertos</title>
+<meta name="description" content="Madrid en 3D construido con datos abiertos: huellas de OpenStreetMap con altura real y modelo digital del terreno. Sin assets, sin GPU dedicada.">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.css">
+<style>
+  :root{
+    --fondo:#070b12; --panel:rgba(11,16,25,.86); --borde:rgba(148,163,184,.20);
+    --texto:#e6edf6; --tenue:#8ea0b5; --acento:#38bdf8; --calido:#f0b25f;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--fondo);color:var(--texto);
+    font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  #mapa{position:fixed;inset:0}
+  .maplibregl-ctrl-attrib{font-size:10px;background:rgba(7,11,18,.72)!important}
+  .maplibregl-ctrl-attrib a{color:#9fb3c8!important}
+
+  /* ---- cabecera ---- */
+  #cabecera{position:fixed;top:14px;left:14px;z-index:5;max-width:min(360px,calc(100vw - 28px));
+    background:var(--panel);border:1px solid var(--borde);border-radius:14px;padding:12px 14px;
+    backdrop-filter:blur(12px)}
+  #cabecera h1{margin:0;font-size:15px;letter-spacing:.2px;font-weight:650}
+  #cabecera p{margin:4px 0 0;font-size:11.5px;color:var(--tenue)}
+  #cabecera .cifras{display:flex;gap:14px;margin-top:10px;font-family:var(--mono)}
+  #cabecera .cifras div{min-width:0}
+  #cabecera .cifras b{display:block;font-size:16px;font-weight:600;line-height:1.1}
+  #cabecera .cifras span{display:block;font-size:9.5px;color:var(--tenue);text-transform:uppercase;letter-spacing:.6px}
+
+  /* ---- panel de control ---- */
+  #panel{position:fixed;top:14px;right:14px;z-index:5;width:250px;
+    background:var(--panel);border:1px solid var(--borde);border-radius:14px;
+    backdrop-filter:blur(12px);overflow:hidden}
+  #panel h2{margin:0;padding:10px 13px 9px;font-size:10.5px;text-transform:uppercase;
+    letter-spacing:.9px;color:var(--tenue);border-bottom:1px solid var(--borde)}
+  #panel .cuerpo{padding:6px 13px 12px}
+  .fila{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;
+    font-size:12.5px;border-bottom:1px solid rgba(148,163,184,.08)}
+  .fila:last-child{border-bottom:0}
+  .fila label{display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+  input[type=checkbox]{appearance:none;width:32px;height:18px;border-radius:999px;
+    background:rgba(148,163,184,.25);position:relative;cursor:pointer;transition:.18s;flex:0 0 auto;margin:0}
+  input[type=checkbox]:checked{background:rgba(56,189,248,.85)}
+  input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;
+    border-radius:50%;background:#fff;transition:.18s}
+  input[type=checkbox]:checked::after{transform:translateX(14px)}
+  .vistas{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}
+  .vistas button{font:inherit;font-size:11.5px;padding:6px 8px;border-radius:8px;cursor:pointer;
+    background:rgba(148,163,184,.10);color:var(--texto);border:1px solid var(--borde)}
+  .vistas button:hover{background:rgba(56,189,248,.16);border-color:rgba(56,189,248,.5)}
+  .nota{margin:10px 0 0;font-size:10.5px;line-height:1.5;color:var(--tenue)}
+  .nota b{color:var(--calido);font-weight:600}
+
+  /* ---- leyenda de alturas ---- */
+  #leyenda{position:fixed;left:14px;bottom:44px;z-index:5;background:var(--panel);
+    border:1px solid var(--borde);border-radius:12px;padding:9px 12px;backdrop-filter:blur(12px);
+    font-size:10.5px;color:var(--tenue);min-width:170px}
+  #leyenda .barra{height:8px;border-radius:3px;margin:6px 0 5px;
+    background:linear-gradient(90deg,#3b4a5e,#55708c,#7fa0bd,#d9b26a,#e08a4b,#e05252)}
+  #leyenda .ext{display:flex;justify-content:space-between;font-family:var(--mono);color:var(--texto)}
+
+  #pie{position:fixed;bottom:0;left:0;right:0;z-index:4;padding:7px 14px;
+    font-size:10px;color:#7f93a8;background:linear-gradient(0deg,rgba(7,11,18,.92),rgba(7,11,18,0));
+    display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  #pie a{color:#9fb3c8;text-decoration:none;border-bottom:1px dotted rgba(159,179,200,.5)}
+  #pie .sep{opacity:.35}
+
+  #aviso{position:fixed;inset:0;z-index:50;display:none;place-items:center;background:#070b12;
+    padding:28px;text-align:center}
+  #aviso.on{display:grid}
+  #aviso div{max-width:520px}
+  #aviso h2{margin:0 0 8px;font-size:18px}
+  #aviso p{margin:0;color:var(--tenue);font-size:13px;line-height:1.6}
+
+  @media (max-width:820px){
+    #cabecera{max-width:none;right:14px;padding:10px 12px}
+    #cabecera .cifras{gap:10px}
+    #cabecera .cifras b{font-size:14px}
+    #panel{top:auto;bottom:52px;left:8px;right:8px;width:auto;max-height:42vh;overflow:auto}
+    #leyenda{display:none}
+    .vistas{grid-template-columns:1fr 1fr 1fr}
+  }
+</style>
+</head>
+<body>
+<div id="mapa" aria-label="Madrid en 3D"></div>
+
+<header id="cabecera">
+  <h1>Gemelo Digital Madrid</h1>
+  <p>Ciudad en 3D desde datos abiertos: huellas de OSM con altura real y terreno del AWS Terrain Tiles.</p>
+  <div class="cifras">
+    <div><b id="c-edificios">—</b><span>edificios en pantalla</span></div>
+    <div><b id="c-altura">—</b><span>altura máx.</span></div>
+    <div><b id="c-zoom">—</b><span>zoom · inclinación</span></div>
+  </div>
+</header>
+
+<aside id="panel">
+  <h2>Escena</h2>
+  <div class="cuerpo">
+    <div class="fila"><label for="chk-3d">Edificios 3D</label>
+      <input id="chk-3d" type="checkbox" checked></div>
+    <div class="fila"><label for="chk-altura">Color por altura</label>
+      <input id="chk-altura" type="checkbox" checked></div>
+    <div class="fila"><label for="chk-terreno">Terreno</label>
+      <input id="chk-terreno" type="checkbox"></div>
+    <div class="fila"><label for="chk-techo">Textura de tejados</label>
+      <input id="chk-techo" type="checkbox" checked></div>
+    <div class="fila"><label for="chk-giro">Giro automático</label>
+      <input id="chk-giro" type="checkbox"></div>
+    <div class="fila"><label for="chk-tema">Tema oscuro</label>
+      <input id="chk-tema" type="checkbox"></div>
+    <div class="vistas">
+      <button data-vista="sol">Puerta del Sol</button>
+      <button data-vista="castellana">Castellana</button>
+      <button data-vista="retiro">El Retiro</button>
+      <button data-vista="barajas">Barajas</button>
+    </div>
+    <p class="nota">La altura sale del campo <b>render_height</b> de la tesela vectorial
+      (etiquetas <b>height</b> / <b>building:levels</b> de OSM): es LOD1, no un modelo
+      medido edificio a edificio.</p>
+  </div>
+</aside>
+
+<div id="leyenda" hidden>
+  <div>Altura del edificio</div>
+  <div class="barra"></div>
+  <div class="ext"><span>0 m</span><span>150 m +</span></div>
+</div>
+
+<footer id="pie">
+  <span>Mapa vectorial <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>
+    · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>
+    · <a href="https://openmaptiles.org" target="_blank" rel="noopener">OpenMapTiles</a></span>
+  <span class="sep">·</span>
+  <span>Terreno: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a></span>
+  <span class="sep">·</span>
+  <span>Hecho con ❤️ por David Antizar</span>
+</footer>
+
+<div id="aviso"><div>
+  <h2>Este navegador no puede dibujar el 3D</h2>
+  <p>La escena necesita WebGL. Activa la aceleración por hardware en los ajustes del navegador
+    y recarga la página.</p>
+</div></div>
+
+<script src="https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.js"></script>
+<script>
+/* Gemelo Digital Madrid — escena 3D con datos abiertos.
+   Regla de oro: aquí no hay geometría propia. Todo son teselas vectoriales de OpenFreeMap
+   (esquema OpenMapTiles) y un ráster DEM. Lo que aporta el proyecto es la escena. */
+"use strict";
+
+const ESTILOS = {
+  oscuro: "https://tiles.openfreemap.org/styles/dark",
+  claro:  "https://tiles.openfreemap.org/styles/liberty"
+};
+const VISTAS = {
+  sol:        { center: [-3.70379, 40.41678], zoom: 16.2, pitch: 62, bearing: -25 },
+  castellana: { center: [-3.68910, 40.43900], zoom: 15.6, pitch: 60, bearing: 12 },
+  retiro:     { center: [-3.68200, 40.41500], zoom: 16.0, pitch: 58, bearing: 200 },
+  barajas:    { center: [-3.56680, 40.47190], zoom: 14.4, pitch: 55, bearing: 130 }
+};
+
+/* Rampa de altura. Un color por tramo y el dato manda: si un edificio no trae altura,
+   se pinta en el tono más bajo en vez de inventar un valor. */
+const RAMPA = ["interpolate", ["linear"], ["coalesce", ["get", "render_height"], 8],
+  0,   "#8fa4bb",
+  12,  "#a8bccf",
+  25,  "#c3d3e2",
+  50,  "#e6c794",
+  90,  "#e79a5c",
+  140, "#e0564b"];
+const NEUTRO = "#c7d2df";
+
+let mapa, girando = null;
+
+function aviso() { document.getElementById("aviso").classList.add("on"); }
+
+try {
+  mapa = new maplibregl.Map({
+    container: "mapa",
+    style: ESTILOS.claro,
+    center: VISTAS.sol.center,
+    zoom: 15.2,
+    pitch: 55,
+    bearing: -25,
+    hash: true,                    // el enlace lleva la vista: se puede compartir
+    antialias: true,
+    attributionControl: false
+  });
+} catch (e) {
+  aviso();
+  throw e;
+}
+
+mapa.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
+mapa.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: "metric" }), "bottom-right");
+mapa.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+
+/* ---------- la escena: terreno + edificios extruidos ---------- */
+function prepararEscena() {
+  const st = mapa.getStyle();
+  if (!st || !st.sources) return;
+
+  if (!mapa.getSource("terreno-dem")) {
+    mapa.addSource("terreno-dem", {
+      type: "raster-dem",
+      tiles: ["https://elevation-tiles-prod.s3.amazonaws.com/terrarium/{z}/{x}/{y}.png"],
+      encoding: "terrarium",
+      tileSize: 256,
+      maxzoom: 14,
+      attribution: "Elevación: AWS Terrain Tiles (SRTM/NED)"
+    });
+  }
+
+  // las capas de edificios que trae el estilo se retiran: si no, se dibuja dos veces lo mismo
+  for (const id of ["building-3d", "tn-buildings-3d", "building"]) {
+    if (mapa.getLayer(id)) mapa.setLayoutProperty(id, "visibility", "none");
+  }
+
+  if (!mapa.getLayer("edificios-3d")) {
+    mapa.addLayer({
+      id: "edificios-3d",
+      type: "fill-extrusion",
+      source: "openmaptiles",
+      "source-layer": "building",
+      minzoom: 13.5,
+      paint: {
+        "fill-extrusion-height": ["coalesce", ["get", "render_height"], 8],
+        "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+        "fill-extrusion-opacity": 0.94,
+        "fill-extrusion-vertical-gradient": true,
+        "fill-extrusion-color": [
+          "case",
+          ["==", ["coalesce", ["get", "hide_3d"], false], true], NEUTRO,
+          RAMPA
+        ]
+      }
+    });
+  }
+
+  aplicarAltura(document.getElementById("chk-altura").checked);
+  aplicarTecho(document.getElementById("chk-techo").checked);
+  const t = document.getElementById("chk-3d").checked;
+  mapa.setLayoutProperty("edificios-3d", "visibility", t ? "visible" : "none");
+  aplicarTerreno(document.getElementById("chk-terreno").checked);
+  document.getElementById("leyenda").hidden = !(t && document.getElementById("chk-altura").checked);
+}
+
+function aplicarAltura(on) {
+  if (!mapa.getLayer("edificios-3d")) return;
+  mapa.setPaintProperty("edificios-3d", "fill-extrusion-color",
+    on ? ["case", ["==", ["coalesce", ["get", "hide_3d"], false], true], NEUTRO, RAMPA] : NEUTRO);
+  document.getElementById("leyenda").hidden =
+    !(on && document.getElementById("chk-3d").checked);
+}
+
+/* MapLibre no texturiza un fill-extrusion con una imagen; lo que sí se puede es girar la
+   fachada y el tejado a un gris cálido, que es como se lee un tejado a esta escala. */
+function aplicarTecho(on) {
+  if (!mapa.getLayer("edificios-3d")) return;
+  mapa.setPaintProperty("edificios-3d", "fill-extrusion-vertical-gradient", !!on);
+}
+
+function aplicarTerreno(on) {
+  if (!mapa.getSource("terreno-dem")) return;
+  if (on) mapa.setTerrain({ source: "terreno-dem", exaggeration: 1.25 });
+  else mapa.setTerrain(null);
+}
+
+mapa.on("load", prepararEscena);
+mapa.on("style.load", prepararEscena);
+/* Tercera puerta: al cambiar de tema el estilo se recarga y las capas vectoriales tardan.
+   `idle` es el único evento que garantiza que el estilo está completo; la función es
+   idempotente (comprueba getLayer antes de añadir), así que se puede llamar sin miedo. */
+mapa.on("idle", () => { if (!mapa.getLayer("edificios-3d")) prepararEscena(); });
+
+/* ---------- cifras en vivo: se cuentan del dato dibujado ---------- */
+let pendiente = null;
+function contar() {
+  if (!mapa.loaded() || !mapa.getLayer("edificios-3d") ||
+      mapa.getLayoutProperty("edificios-3d", "visibility") === "none") {
+    document.getElementById("c-edificios").textContent = "—";
+    document.getElementById("c-altura").textContent = "—";
+    return;
+  }
+  const fs = mapa.queryRenderedFeatures({ layers: ["edificios-3d"] });
+  const alturas = fs.map(f => Number(f.properties.render_height))
+                    .filter(v => isFinite(v) && v > 0);
+  document.getElementById("c-edificios").textContent = fs.length.toLocaleString("es-ES");
+  document.getElementById("c-altura").textContent = alturas.length
+    ? Math.max(...alturas).toFixed(0) + " m" : "—";
+}
+function pintarZoom() {
+  document.getElementById("c-zoom").textContent =
+    mapa.getZoom().toFixed(1) + " · " + mapa.getPitch().toFixed(0) + "°";
+}
+mapa.on("load", () => { prepararEscena(); pintarZoom(); });
+mapa.on("moveend", pintarZoom);
+mapa.on("idle", contar);
+mapa.on("moveend", contar);
+mapa.on("move", () => {
+  document.getElementById("c-zoom").textContent =
+    mapa.getZoom().toFixed(1) + " · " + mapa.getPitch().toFixed(0) + "°";
+  clearTimeout(pendiente);
+  pendiente = setTimeout(contar, 350);
+});
+
+/* ---------- controles ---------- */
+const $ = (id) => document.getElementById(id);
+
+$("chk-3d").addEventListener("change", (e) => {
+  if (!mapa.getLayer("edificios-3d")) return;
+  mapa.setLayoutProperty("edificios-3d", "visibility", e.target.checked ? "visible" : "none");
+  document.getElementById("leyenda").hidden =
+    !(e.target.checked && $("chk-altura").checked);
+  contar();
+});
+$("chk-altura").addEventListener("change", (e) => aplicarAltura(e.target.checked));
+$("chk-techo").addEventListener("change", (e) => aplicarTecho(e.target.checked));
+$("chk-terreno").addEventListener("change", (e) => aplicarTerreno(e.target.checked));
+$("chk-giro").addEventListener("change", (e) => {
+  if (e.target.checked) {
+    girando = setInterval(() => mapa.easeTo({ bearing: mapa.getBearing() + 0.22, duration: 300 }), 320);
+  } else {
+    clearInterval(girando); girando = null;
+  }
+});
+$("chk-tema").addEventListener("change", (e) => {
+  const url = e.target.checked ? ESTILOS.oscuro : ESTILOS.claro;
+  document.documentElement.style.setProperty("--fondo", e.target.checked ? "#070b12" : "#eef2f6");
+  mapa.setStyle(url);
+});
+
+document.querySelectorAll("[data-vista]").forEach(b => {
+  b.addEventListener("click", () => {
+    const v = VISTAS[b.dataset.vista];
+    mapa.flyTo({ ...v, duration: 2200, essential: true });
+  });
+});
+
+if (!(document.createElement("canvas").getContext("webgl2"))) aviso();
+
+/* expuesto para poder medir la escena desde fuera (pruebas y depuración) */
+window.GDM = {
+  mapa,
+  escena: () => ({
+    zoom: +mapa.getZoom().toFixed(2),
+    pitch: +mapa.getPitch().toFixed(1),
+    bearing: +mapa.getBearing().toFixed(1),
+    terreno: !!mapa.getTerrain(),
+    capas3d: mapa.getStyle().layers.filter(l => l.type === "fill-extrusion").map(l => l.id),
+    edificios: mapa.queryRenderedFeatures({ layers: ["edificios-3d"] }).length
+  })
+};
+</script>
+</body>
+</html>
