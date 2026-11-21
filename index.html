@@ -283,7 +283,7 @@ mapa.on("style.load", prepararEscena);
 mapa.on("idle", () => { if (!mapa.getLayer("edificios-3d")) prepararEscena(); });
 
 /* ---------- cifras en vivo: se cuentan del dato dibujado ---------- */
-let pendiente = null;
+let pendiente = null, ultimoEdificios = 0;
 function contar() {
   if (!mapa.getLayer("edificios-3d") ||
       mapa.getLayoutProperty("edificios-3d", "visibility") === "none") {
@@ -292,8 +292,14 @@ function contar() {
     return;
   }
   const fs = mapa.queryRenderedFeatures({ layers: ["edificios-3d"] });
+  // Un cero cuando aún no ha habido render es mentira: se deja el último valor bueno o «—».
+  if (!fs.length) {
+    if (!ultimoEdificios) document.getElementById("c-edificios").textContent = "—";
+    return;
+  }
   const alturas = fs.map(f => Number(f.properties.render_height))
                     .filter(v => isFinite(v) && v > 0);
+  ultimoEdificios = fs.length;
   document.getElementById("c-edificios").textContent = fs.length.toLocaleString("es-ES");
   document.getElementById("c-altura").textContent = alturas.length
     ? Math.max(...alturas).toFixed(0) + " m" : "—";
