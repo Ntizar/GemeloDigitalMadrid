@@ -51,6 +51,7 @@ MARGEN_CAJA = 2200.0
 PASO_MALLA = 130.0
 TOL = 3.0          # simplificación de la traza, m
 PROF_TUNEL = 3.5   # metros bajo el andén
+RADIO_RECORTE = 95.0  # m: el modelo se recorta al corredor de la línea
 
 
 def latlon_a_utm(lat, lon):
@@ -329,7 +330,19 @@ def main(linea):
         giros.append(math.degrees(th))
         partes_p.append(pp.astype(np.float32))
         partes_c.append(col[v0:v0 + vn])
-        partes_i.append(idx[m["i0"]:m["i0"] + m["in"]] - v0 + vo)
+        triloc = (idx[m["i0"]:m["i0"] + m["in"]] - v0).reshape(-1, 3)
+        cen = pp[triloc].mean(1)
+        # distancia de cada triángulo a la polilínea de la traza
+        a1 = traza[:-1]; ab1 = traza[1:] - a1
+        l21 = (ab1 ** 2).sum(1); l21[l21 == 0] = 1e-9
+        dm = np.full(len(cen), 1e9)
+        for k in range(0, len(cen), 512):
+            q = cen[k:k + 512][:, [0, 2]]
+            t = np.clip(((q[:, None, :] - a1[None]) * ab1[None]).sum(2) / l21[None], 0, 1)
+            proj = a1[None] + ab1[None] * t[:, :, None]
+            dm[k:k + 512] = np.linalg.norm(proj - q[:, None, :], axis=2).min(1)
+        sel = triloc[dm < RADIO_RECORTE].ravel()
+        partes_i.append(sel + vo)
         m2 = dict(m)
         m2["v0"], m2["i0"] = vo, io_
         m2["c"] = [round(float(m["c"][0] + dp[0] - cx + cx), 2), round(float(m["c"][1]), 2),
@@ -339,9 +352,10 @@ def main(linea):
         m2["pozo"] = [round(float(m2["c"][0]), 2), round(float(m2["c"][2]), 2)]
         m2["pozo_y"] = round(float(m["pozo_y"]), 2)
         m2["giro_deg"] = round(math.degrees(th), 1)
+        m2["in"] = int(len(sel))
         nuevas.append(m2)
         vo += vn
-        io_ += m["in"]
+        io_ += int(len(sel))
 
     pos2 = np.concatenate(partes_p) if partes_p else np.zeros((0, 3), np.float32)
     col2 = np.concatenate(partes_c) if partes_c else np.zeros((0, 3), np.uint8)
