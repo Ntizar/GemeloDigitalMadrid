@@ -51,7 +51,43 @@ Análisis completo, con las cifras medidas: `MasterMind/notes/2026-11-21-provena
 - **`vision_analyze` no decide**: dos pasadas del mismo PNG pueden decir «no hay edificios» y «hay 425».
   Lo que manda es `queryRenderedFeatures` sobre la capa real.
 
-## 5. Siguiente escalón, con su coste
+## 5. Metro bajo la ciudad: capa 3D propia (prueba con la L10)
+
+El terreno de MapLibre **no admite opacidad ni recorte**: lo que quede por debajo, desaparece. Medido
+en un banco de pruebas con una caja a −40 m y una torre de control sobre el suelo: con `setTerrain()`
+**0 px** de túnel y **453 px** de torre; sin terreno, **3.944 px** de túnel.
+
+De ahí la decisión: el metro **no es una capa vectorial**, es una capa `custom` con three.js dentro del
+contexto WebGL de MapLibre, y el visor tiene **dos modos**:
+
+- **superficie** — terreno y edificios normales, metro oculto;
+- **subsuelo** — `setTerrain(null)`, edificios y corteza semitransparentes, y la red a su cota real.
+
+Trampas pagadas aquí:
+
+- **MapLibre 5 cambió la firma de `render()`**: llega `args.defaultProjectionData.mainMatrix`, no la
+  matriz suelta. Con la firma antigua salen NaN y cero píxeles sin ningún error en consola.
+- **`frustumCulled = false`** en toda la geometría: la matriz está en mercator (≈0,5) y los vértices en
+  metros, así que three descarta la escena entera sin avisar.
+- **El datum se elige por modo**: con terreno, altitud absoluta (660,5 m en Sol); sin terreno, cotas
+  relativas, que es lo que mira la cámara de MapLibre.
+- **El GTFS no trae cota de vía.** Sin perfil, el túnel se dibuja a ras de calle y el «modo subsuelo»
+  se lee como una cinta pintada. Se interpola la profundidad entre las dos estaciones más cercanas:
+  resultado medido, **−20,4 m de mediana** respecto al terreno (rango −9,0 a −26,6).
+
+### El dato: el catálogo estaba 1,5 km desplazado
+
+`metro-gemelo/datos/red.json` (catálogo resuelto) está **desplazado ~1,5 km al suroeste** respecto al
+GTFS oficial y tiene **±200 m de dispersión propia** (31 estaciones de la L10 emparejadas con
+`stops.txt`: traslación media +693 / −1.402 m, residuo mediano 58 m, máximo 232 m). Su README declara
+«error mediano 2,6 m», pero eso mide coherencia con **su propio eje**, no con la ciudad.
+
+Por eso `scripts/hornear_metro.py` **no usa las x/z del catálogo**: reconstruye la traza del
+`shapes.txt` oficial y ancla cada estación a su parada de `stops.txt` por nombre. Recibo tras el
+cambio (31 estaciones contra OSM): Tribunal 88 m, Nuevos Ministerios 63 m, Chamartín 0 m, Casa de
+Campo 3 m, Príncipe Pío 9 m.
+
+## 6. Siguiente escalón, con su coste
 
 - **LOD2** — LiDAR **MDT02** del IGN (2 m) para altura por vértice y tejado inclinado, más
   `numberOfFloorsAboveGround` del Catastro (WFS INSPIRE, gratis y sin clave). Es el salto que cambia

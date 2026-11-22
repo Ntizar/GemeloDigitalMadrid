@@ -43,6 +43,32 @@ propio dato (no se inventa una altura para lo que el editor marcó como no volum
 - El contador de la cabecera **se cuenta del dato dibujado** (`queryRenderedFeatures`), no de un
   array en memoria: si no hay edificios en la vista, pone «—», no un cero mintiendo.
 
+## Metro bajo tierra (prueba con la L10)
+
+**`Metro L10 bajo tierra`** en el panel: apaga el terreno, deja **edificios y corteza translúcidos** y
+dibuja la línea a su cota real. Dos deslizadores (edificios y suelo) abren o cierran el «rayos X».
+
+| Pieza | Fuente | Cifra |
+|---|---|---|
+| Traza | GTFS oficial del CRTM (`shapes.txt`), simplificada a 4 m | 4 trazas · 350 puntos · **38,23 km** |
+| Anclaje de estaciones | `stops.txt` por nombre | 31/31 · error mediano **17 m** al eje |
+| Estaciones 3D | modelos del catálogo, trasladados a su parada | **118.103 triángulos** en 1 llamada |
+| Andenes | catálogo funcional | **64** andenes |
+| Corteza | DEM terrarium + ortofoto PNOA recortada | 172 × 222 cotas · 1 MB de textura |
+| Perfil de vía | interpolado entre las dos estaciones más cercanas | **−20,4 m** de mediana bajo el terreno |
+
+Tres cosas que hay que saber antes de tocar esto:
+
+- **El metro no es una capa vectorial.** El terreno de MapLibre no se puede hacer translúcido, así que
+  la línea va como capa `custom` con three.js dentro del contexto WebGL del mapa. Con terreno activo,
+  el subsuelo no se ve (0 px medidos); el modo subsuelo apaga el terreno y pone su propia corteza.
+- **El GTFS no trae cota de vía.** Se interpola la profundidad entre estaciones; sin eso el túnel se
+  dibuja a ras de calle y parece una cinta pintada.
+- **Se regenera con** `python scripts/hornear_metro.py 10` (lee de `../metro-gemelo`; `METRO_GEMELO=`
+  para otra ruta). Ojo: el `red.json` de `metro-gemelo` está **~1,5 km desplazado** respecto al GTFS
+  oficial, por eso el horneador reconstruye la traza desde `shapes.txt` y ancla por `stops.txt`.
+  Detalle y cifras: [`docs/DECISIONES.md`](docs/DECISIONES.md) §5.
+
 ## Hoja de ruta
 
 | Fase | Qué | Qué cambia |
@@ -50,7 +76,7 @@ propio dato (no se inventa una altura para lo que el editor marcó como no volum
 | 1 | LOD1 con OpenFreeMap + Terrarium (**esto**) | la ciudad se lee, gratis y en móvil |
 | 2 | **LOD2**: LiDAR MDT02 del IGN (2 m) + `numberOfFloorsAboveGround` del Catastro (WFS INSPIRE) | silueta real: tejados inclinados, áticos, patios |
 | 3 | Fachadas: PNOA oblicua o Mapillary | deja de ser «papel pintado» |
-| 4 | Capas de datos encima: red eléctrica y agua de **OpenInfraES**, transporte GTFS | el gemelo pasa a cuadro de mando |
+| 4 | Capas de datos encima: red eléctrica y agua de **OpenInfraES**, transporte GTFS | el gemelo pasa a cuadro de mando · **transporte: L10 bajo tierra hecho** |
 
 Detalle de las decisiones y de los descartes: [`docs/DECISIONES.md`](docs/DECISIONES.md).
 

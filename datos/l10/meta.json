@@ -1,0 +1,38 @@
+{
+ "linea": "10",
+ "color": "#005AA9",
+ "estaciones": 31,
+ "estaciones_con_modelo": 31,
+ "andenes": 64,
+ "rutas": 4,
+ "puntos_traza": 350,
+ "longitud_km": 38.23,
+ "vertices": 128786,
+ "triangulos": 118103,
+ "terreno": {
+  "nx": 172,
+  "nz": 222,
+  "x0": -11761.3,
+  "x1": 10444.1,
+  "z0": -18325.4,
+  "z1": 10365.0,
+  "h_ref": 660.5,
+  "cota_min": -108.5999984741211,
+  "cota_max": 105.30000305175781,
+  "paso_m": 129.9,
+  "fuente": "AWS terrain-tiles (terrarium) z13 ~14,6 m/px"
+ },
+ "relieve": true,
+ "datum": "GTFS CRTM oficial (shapes/stops)",
+ "anclaje_error_m": {
+  "mediana": 17.0,
+  "p90": 84.5,
+  "max": 129.5
+ },
+ "sin_parada_oficial": [],
+ "cota_anden_m": [
+  -72.1,
+  66.9
+ ],
+ "fuente": "CRTM GTFS + modelos 20-nov-2026 (croquis) + DEM terrarium z13 + PNOA"
+}
