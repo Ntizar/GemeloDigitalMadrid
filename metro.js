@@ -21,8 +21,8 @@ const mapa = window.GDM.mapa;
 
 const estado = {
   activo: false,
-  edificios: 0.18,
-  suelo: 0.62,
+  edificios: 0.14,
+  suelo: 0.78,
   estaciones: true,
   tuneles: true,
   andenes: true,
