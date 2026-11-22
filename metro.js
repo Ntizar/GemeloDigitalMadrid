@@ -42,13 +42,15 @@ const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------ carga de datos ---------- */
 async function cargar() {
-  const [red, m, terrenoJson] = await Promise.all([
+  const [red, m, cabTxt, terrenoJson] = await Promise.all([
     fetch(BASE + 'red.json?v=1').then((r) => r.json()),
     fetch(BASE + 'meta.json?v=1').then((r) => r.json()),
+    fetch(BASE + 'estaciones.bin?v=1').then((r) => r.arrayBuffer()),
     fetch(BASE + 'terreno.json?v=1').then((r) => r.json()),
   ]);
   datos = red;
   meta = m;
+  cab = leerMMG(cabTxt);
   return { terrenoJson };
 }
 
@@ -331,8 +333,9 @@ function capaMetro() {
 
       grupoTuneles = montarRed(datos.color);
       grupoAndenes = montarAndenes();
+      grupoEstaciones = montarEstaciones(cab);
       grupoEstacionesTraza = montarEstacionesTraza();
-      escena.add(grupoTuneles, grupoAndenes, grupoEstacionesTraza);
+      escena.add(grupoTuneles, grupoAndenes, grupoEstacionesTraza, grupoEstaciones);
       if (corteza) escena.add(corteza);
       capaLista = true;
       aplicarVisibilidad();
@@ -362,6 +365,7 @@ function aplicarVisibilidad() {
   grupoTuneles.visible = estado.tuneles;
   grupoAndenes.visible = estado.andenes;
   grupoEstacionesTraza.visible = estado.estaciones;
+  grupoEstaciones.visible = estado.croquis;
   if (corteza) corteza.visible = estado.suelo > 0.02;
   const cont = $('etiquetas');
   if (cont) cont.hidden = !(estado.activo && estado.etiquetas);
@@ -513,7 +517,7 @@ async function arrancar() {
         activo: estado.activo, capa: !!mapa.getLayer('metro3d'),
         tuneles: grupoTuneles ? grupoTuneles.children.length : 0,
         estacionesTraza: grupoEstacionesTraza ? grupoEstacionesTraza.children.length : 0,
-        estaciones: datos.estaciones.length,
+        estaciones: cab ? cab.header.estaciones.length : datos.estaciones.length,
         tris: renderer ? renderer.info.render.triangles : 0,
         llamadas: renderer ? renderer.info.render.calls : 0,
         etiquetas: etiquetas.length,
@@ -551,7 +555,7 @@ function conectar() {
     aplicarVisibilidad();
   });
 
-  for (const [id, clave] of [['chk-est', 'estaciones'], ['chk-tun', 'tuneles'], ['chk-and', 'andenes'], ['chk-etq', 'etiquetas']]) {
+  for (const [id, clave] of [['chk-est', 'estaciones'], ['chk-tun', 'tuneles'], ['chk-and', 'andenes'], ['chk-etq', 'etiquetas'], ['chk-croquis', 'croquis']]) {
     const el = $(id);
     if (el) el.addEventListener('change', () => { estado[clave] = el.checked; aplicarVisibilidad(); pintarEtiquetas(); });
   }

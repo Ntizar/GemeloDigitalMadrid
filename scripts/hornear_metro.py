@@ -256,42 +256,89 @@ def main(linea):
         e["giro"] = round(math.degrees(math.atan2(float(tan[1]), float(tan[0]))), 2)
         anclas.append((e["nombre"], dist))
 
-    # ---- 3) modelos: centro al punto de la traza + giro por PCA ----
+    # ---- 3) ENCAJE POR ANDÉN: el eje fiable no es el modelo, es su andén ----
+    # El modelo de un intercambiador es casi cuadrado (ratio 0,9) y su PCA no
+    # apunta a ninguna parte. El andén, en cambio, es una línea: su dirección sí
+    # es fiable. Se gira el modelo alrededor del centroide de SU andén para que
+    # ese andén caiga sobre la traza, y se prueban los dos sentidos (±180°) más
+    # un barrido fino de ±6°.
+    def rotar_xy(q, c, th):
+        ca, sa = math.cos(th), math.sin(th)
+        d = q - c
+        return np.stack([d[:, 0] * ca - d[:, 1] * sa, d[:, 0] * sa + d[:, 1] * ca], 1) + c
+
+    def dist_media(q, P, paso=3):
+        a = P[:-1]
+        ab = P[1:] - a
+        l2 = (ab ** 2).sum(1)
+        l2[l2 == 0] = 1e-9
+        sub = q[::max(1, len(q) // 16)]
+        tot = 0.0
+        for punto in sub:
+            t = np.clip(((punto - a) * ab).sum(1) / l2, 0, 1)
+            proj = a + ab * t[:, None]
+            tot += float(np.linalg.norm(proj - punto, axis=1).min())
+        return tot / len(sub)
+
+    def eje_path(path):
+        q = np.array([[p[0], p[2]] for p in path], float)
+        q = q - q.mean(0)
+        w, v = np.linalg.eigh(np.cov(q.T))
+        e = v[:, int(np.argmax(w))]
+        return math.atan2(e[1], e[0])
+
+    for e in estaciones:
+        if "_P" not in e or not e["andenes"]:
+            e["_theta"], e["_ca"] = 0.0, None
+            continue
+        cand_a = [a for a in e["andenes"] if a.get("l") == linea] or e["andenes"]
+        and_ = max(cand_a, key=lambda a: len(a["path"]))
+        Pa = np.array([[p[0], p[2]] for p in and_["path"]], float)
+        ca = Pa.mean(0)
+        ang_anden = eje_path(and_["path"])
+        ang_traza = math.atan2(e["_tan"][1], e["_tan"][0])
+        mejor = None
+        for base in (ang_traza - ang_anden, ang_traza - ang_anden + math.pi):
+            for dg in np.arange(-6.0, 6.01, 1.0):
+                th = base + math.radians(float(dg))
+                dm = dist_media(rotar_xy(Pa, ca, th), traza)
+                if mejor is None or dm < mejor[0]:
+                    mejor = (dm, th)
+        e["_theta"] = mejor[1]
+        e["_ca"] = ca
+        e["_and_dist"] = mejor[0]
+
+    # ---- 4) modelos y andenes con esa transformación ----
     cab, pos, col, idx = leer_mmg(os.path.join(DATOS_F, "estaciones.bin"))
     por_code = {e["code"]: e for e in estaciones}
     partes_p, partes_c, partes_i, nuevas = [], [], [], []
     vo = io_ = 0
-    giros, residuos = [], []
+    giros = []
     for m in cab["estaciones"]:
         e = por_code.get(m["code"])
-        if not e or "_P" not in e:
+        if not e or "_P" not in e or e.get("_ca") is None:
             continue
         v0, vn = m["v0"], m["vn"]
-        p = pos[v0:v0 + vn].astype(np.float64)
-        c_m = np.array([m["c"][0], 0.0, m["c"][2]])
-        ang_modelo = eje_largo(p)
-        ang_traza = math.atan2(e["_tan"][1], e["_tan"][0])
-        theta = ang_traza - ang_modelo
-        theta = (theta + math.pi / 2) % math.pi - math.pi / 2   # eje sin sentido: ±90°
-        p = rotar_planta(p, c_m, theta)
-        dp = np.array([e["_P"][0] - c_m[0], 0.0, e["_P"][1] - c_m[2]])
-        p = p + dp
-        centro = c_m + dp
-        giros.append(math.degrees(theta))
-        # residuo: eje del modelo ya girado vs tangente
-        ang_final = eje_largo(p)
-        dif = abs(((ang_final - ang_traza + math.pi / 2) % math.pi) - math.pi / 2)
-        residuos.append(math.degrees(dif))
-
-        partes_p.append(p.astype(np.float32))
+        pp = pos[v0:v0 + vn].astype(np.float64)
+        cx, cz = float(e["_ca"][0]), float(e["_ca"][1])
+        centro_rot = np.array([cx, 0.0, cz])
+        th = e["_theta"]
+        pp = rotar_planta(pp, centro_rot, th)
+        dp = np.array([e["_P"][0] - cx, 0.0, e["_P"][1] - cz])
+        pp = pp + dp
+        giros.append(math.degrees(th))
+        partes_p.append(pp.astype(np.float32))
         partes_c.append(col[v0:v0 + vn])
         partes_i.append(idx[m["i0"]:m["i0"] + m["in"]] - v0 + vo)
         m2 = dict(m)
         m2["v0"], m2["i0"] = vo, io_
-        m2["c"] = [round(float(centro[0]), 2), round(float(m["c"][1]), 2), round(float(centro[2]), 2)]
-        m2["pozo"] = [round(float(centro[0]), 2), round(float(centro[2]), 2)]
+        m2["c"] = [round(float(m["c"][0] + dp[0] - cx + cx), 2), round(float(m["c"][1]), 2),
+                   round(float(m["c"][2] + dp[2]), 2)]
+        m2["c"][0] = round(float(e["_P"][0] + (m["c"][0] - cx) * math.cos(th) - (m["c"][2] - cz) * math.sin(th)), 2)
+        m2["c"][2] = round(float(e["_P"][1] + (m["c"][0] - cx) * math.sin(th) + (m["c"][2] - cz) * math.cos(th)), 2)
+        m2["pozo"] = [round(float(m2["c"][0]), 2), round(float(m2["c"][2]), 2)]
         m2["pozo_y"] = round(float(m["pozo_y"]), 2)
-        m2["giro_deg"] = round(math.degrees(theta), 1)
+        m2["giro_deg"] = round(math.degrees(th), 1)
         nuevas.append(m2)
         vo += vn
         io_ += m["in"]
@@ -300,24 +347,21 @@ def main(linea):
     col2 = np.concatenate(partes_c) if partes_c else np.zeros((0, 3), np.uint8)
     idx2 = np.concatenate(partes_i) if partes_i else np.zeros(0, np.uint32)
 
-    # ---- 4) andenes: misma rotación y traslación que su modelo ----
     for e in estaciones:
-        m = next((x for x in nuevas if x["code"] == e["code"]), None)
-        if m is None:
+        if e.get("_ca") is None:
             e["andenes"] = []
             continue
-        # recomponer transformación desde el modelo original
-        orig = next((x for x in cab["estaciones"] if x["code"] == e["code"]), None)
-        c_m = np.array([orig["c"][0], 0.0, orig["c"][2]])
-        theta = math.radians(m["giro_deg"])
-        dp = np.array([e["_P"][0] - c_m[0], 0.0, e["_P"][1] - c_m[2]])
+        cx, cz = float(e["_ca"][0]), float(e["_ca"][1])
+        centro_rot = np.array([cx, 0.0, cz])
+        dp = np.array([e["_P"][0] - cx, 0.0, e["_P"][1] - cz])
+        th = e["_theta"]
         nuevos = []
         for a in e["andenes"]:
             if a.get("l") != linea:
                 continue
             path = np.asarray(a["path"], dtype=float)
-            path = rotar_planta(path, c_m, theta) + dp
-            path[:, 1] = a["y"]      # cota relativa del catálogo (0 = calle)
+            path = rotar_planta(path, centro_rot, th) + dp
+            path[:, 1] = a["y"]
             a["path"] = path.round(2).tolist()
             a["y"] = round(float(a["y"]), 2)
             nuevos.append(a)
@@ -382,12 +426,25 @@ def main(linea):
 
     # ---- 7) validación medida ----
     tr = np.asarray([[p[0], p[2]] for p in ruta_p])
-    resid_est = []
-    for e in nuevas:
-        d = np.min(np.hypot(tr[:, 0] - e["c"][0], tr[:, 1] - e["c"][2]))
-        resid_est.append(float(d))
+    def dist_linea(x, z):
+        a1 = tr[:-1]; ab1 = tr[1:] - a1
+        l21 = (ab1 ** 2).sum(1); l21[l21 == 0] = 1e-9
+        t = np.clip(((np.array([x, z]) - a1) * ab1).sum(1) / l21, 0, 1)
+        proj = a1 + ab1 * t[:, None]
+        return float(np.linalg.norm(proj - np.array([x, z]), axis=1).min())
+
+    resid_est = [dist_linea(e["c"][0], e["c"][2]) for e in nuevas]
+    and_final = []
+    for e in estaciones:
+        for a in e["andenes"]:
+            for q in a["path"][::max(1, len(a["path"]) // 8)]:
+                and_final.append(dist_linea(q[0], q[2]))
     long_km = sum(math.dist((ruta_p[i][0], ruta_p[i][2]), (ruta_p[i - 1][0], ruta_p[i - 1][2]))
                   for i in range(1, len(ruta_p))) / 1000
+
+    and_dists = [float(e.get("_and_dist", 0.0)) for e in estaciones]
+    for e in estaciones:
+        e.pop("_ca", None); e.pop("_theta", None); e.pop("_and_dist", None)
 
     sal = {"linea": linea, "color": color, "rutas": rutas, "estaciones": estaciones,
            "caja": caja, "datum": "RELATIVO_CALLE_0", "plano": True,
@@ -415,8 +472,9 @@ def main(linea):
                                     "max": round(float(max(resid_est)), 1)},
         "giro_modelo_deg": {"mediana": round(float(np.median(np.abs(giros))), 1),
                             "max": round(float(max(np.abs(giros))), 1)},
-        "desalineacion_eje_deg": {"mediana": round(float(np.median(residuos)), 1),
-                                  "max": round(float(max(residuos)), 1)},
+        "anden_a_traza_m": {"mediana": round(float(np.median(and_final)), 1) if and_final else None,
+                            "p90": round(float(np.percentile(and_final, 90)), 1) if and_final else None,
+                            "max": round(float(max(and_final)), 1) if and_final else None},
         "stop_a_traza_m": {"mediana": round(float(np.median([d for _, d in anclas])), 1),
                            "max": round(float(max(d for _, d in anclas)), 1)},
         "profundidad_tunel_m": [round(float(min(p[1] for p in ruta_p)), 1),
@@ -427,7 +485,7 @@ def main(linea):
               ensure_ascii=False, indent=1)
     print(json.dumps({k: meta[k] for k in ("estaciones", "andenes", "puntos_traza", "longitud_km",
                                            "centro_modelo_a_traza_m", "giro_modelo_deg",
-                                           "desalineacion_eje_deg", "profundidad_tunel_m")},
+                                           "anden_a_traza_m", "profundidad_tunel_m")},
                      ensure_ascii=False, indent=1))
     for f in ("red.json", "estaciones.bin", "terreno.bin", "terreno.jpg", "meta.json"):
         print(f"  {f:16s} {os.path.getsize(os.path.join(salida, f))/1024:8.1f} KB")
