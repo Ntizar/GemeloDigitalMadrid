@@ -42,15 +42,13 @@ const $ = (id) => document.getElementById(id);
 
 /* ------------------------------------------------ carga de datos ---------- */
 async function cargar() {
-  const [red, m, cabTxt, terrenoJson] = await Promise.all([
+  const [red, m, terrenoJson] = await Promise.all([
     fetch(BASE + 'red.json?v=1').then((r) => r.json()),
     fetch(BASE + 'meta.json?v=1').then((r) => r.json()),
-    fetch(BASE + 'estaciones.bin?v=1').then((r) => r.arrayBuffer()),
     fetch(BASE + 'terreno.json?v=1').then((r) => r.json()),
   ]);
   datos = red;
   meta = m;
-  cab = leerMMG(cabTxt);
   return { terrenoJson };
 }
 
@@ -333,9 +331,8 @@ function capaMetro() {
 
       grupoTuneles = montarRed(datos.color);
       grupoAndenes = montarAndenes();
-      grupoEstaciones = montarEstaciones(cab);
       grupoEstacionesTraza = montarEstacionesTraza();
-      escena.add(grupoTuneles, grupoAndenes, grupoEstacionesTraza, grupoEstaciones);
+      escena.add(grupoTuneles, grupoAndenes, grupoEstacionesTraza);
       if (corteza) escena.add(corteza);
       capaLista = true;
       aplicarVisibilidad();
@@ -364,7 +361,6 @@ function aplicarVisibilidad() {
   if (!capaLista) return;
   grupoTuneles.visible = estado.tuneles;
   grupoAndenes.visible = estado.andenes;
-  grupoEstaciones.visible = estado.croquis;
   grupoEstacionesTraza.visible = estado.estaciones;
   if (corteza) corteza.visible = estado.suelo > 0.02;
   const cont = $('etiquetas');
@@ -496,12 +492,12 @@ async function arrancar() {
       salir: () => { if ($('chk-metro')) $('chk-metro').checked = false; salir(); },
       volar,
       diag: () => {
-        const b = new THREE.Box3().setFromObject(grupoEstaciones);
+        const b = new THREE.Box3().setFromObject(grupoEstacionesTraza);
         const b2 = new THREE.Box3().setFromObject(grupoTuneles);
         const b3 = corteza ? new THREE.Box3().setFromObject(corteza) : null;
         const r = (v) => v.toArray().map((n) => +n.toFixed(1));
         return {
-          estaciones: { min: r(b.min), max: r(b.max) },
+          estacionesTraza: { min: r(b.min), max: r(b.max) },
           tuneles: { min: r(b2.min), max: r(b2.max) },
           corteza: b3 ? { min: r(b3.min), max: r(b3.max) } : null,
           estacionPx: (nombre) => {
@@ -517,7 +513,7 @@ async function arrancar() {
         activo: estado.activo, capa: !!mapa.getLayer('metro3d'),
         tuneles: grupoTuneles ? grupoTuneles.children.length : 0,
         estacionesTraza: grupoEstacionesTraza ? grupoEstacionesTraza.children.length : 0,
-        estaciones: cab ? cab.header.estaciones.length : 0,
+        estaciones: datos.estaciones.length,
         tris: renderer ? renderer.info.render.triangles : 0,
         llamadas: renderer ? renderer.info.render.calls : 0,
         etiquetas: etiquetas.length,
@@ -555,7 +551,7 @@ function conectar() {
     aplicarVisibilidad();
   });
 
-  for (const [id, clave] of [['chk-est', 'estaciones'], ['chk-tun', 'tuneles'], ['chk-and', 'andenes'], ['chk-etq', 'etiquetas'], ['chk-croquis', 'croquis']]) {
+  for (const [id, clave] of [['chk-est', 'estaciones'], ['chk-tun', 'tuneles'], ['chk-and', 'andenes'], ['chk-etq', 'etiquetas']]) {
     const el = $(id);
     if (el) el.addEventListener('change', () => { estado[clave] = el.checked; aplicarVisibilidad(); pintarEtiquetas(); });
   }
