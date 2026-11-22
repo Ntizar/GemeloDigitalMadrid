@@ -1,31 +1,19 @@
-"""Hornea UNA línea de metro para el Gemelo Digital Madrid.
+"""Hornea UNA línea de metro para el Gemelo Digital Madrid — v3 (plano relativo).
 
-Fuentes (todas oficiales o ya resueltas en `metro-gemelo`):
-  - GTFS del CRTM (`datos/gtfs/metro.zip`): shapes.txt y stops.txt -> traza y anclaje
-  - modelos de estación ya fusionados (`datos/estaciones.bin`, MMG1)
-  - corteza DEM terrarium (`datos/terreno.png`) y ortofoto PNOA (`datos/ortofoto.jpg`)
+Reglas que resuelven los tres defectos medidos en la v1:
 
-AVISO IMPORTANTE (medido, no supuesto): las coordenadas del catálogo
-`metro-gemelo/datos/red.json` están desplazadas ~1,5 km al suroeste respecto al
-GTFS oficial y tienen ±200 m de dispersión propia. Por eso este horneador NO usa
-sus x/z para georreferenciar: la traza se reconstruye del shapes.txt y cada
-estación se ancla a su parada de stops.txt por nombre. Los andenes y los modelos
-del catálogo se trasladan con el delta de SU estación, así conservan su
-geometría interna.
+1. TODO en cotas RELATIVAS a la calle (0 = superficie). El visor dibuja el suelo
+   a 0 y los edificios de MapLibre también están a 0: con cotas absolutas el
+   metro flotaba 60 m sobre los edificios en Plaza de Castilla.
+2. UNA sola traza (la shape más larga). Las 4 shapes del GTFS son dos servicios
+   distintos: superpuestas daban 13 cruces.
+3. Los modelos se anclan por su CENTRO y se GIRAN por su eje largo (PCA en
+   planta) para alinearlo con la tangente de la traza. Anclar el centroide del
+   catálogo dejaba estaciones a 100-586 m de la vía.
 
-Marco local (el mismo del gemelo):
-    x = E - 440.291,28      z = -(N - 4.474.254,60)      y = cota relativa a Sol
-
-Salidas en datos/l<n>/:
-  red.json        traza oficial simplificada + estaciones con andenes
-  estaciones.bin  modelos MMG1 de la línea, anclados a su parada
-  terreno.bin     cotas de la corteza decimadas (float32)
-  terreno.jpg     ortofoto recortada
-  meta.json       cifras y errores medidos
-
-Uso:
-  python scripts/hornear_metro.py 10
-  METRO_GEMELO=/ruta/a/metro-gemelo python scripts/hornear_metro.py 10
+Fuentes: GTFS CRTM (shapes/stops) + modelos MMG1 de metro-gemelo + PNOA.
+Salidas en datos/l<n>/: red.json, estaciones.bin, terreno.bin, terreno.json,
+terreno.jpg, meta.json.
 """
 
 import csv
@@ -59,12 +47,12 @@ COLORES = {
     "11": "#009B3A", "12": "#A49800", "R": "#8AB4E8",
 }
 
-MARGEN_CAJA = 2500.0
+MARGEN_CAJA = 2200.0
 PASO_MALLA = 130.0
-TOLERANCIA_SIMPLIFICAR = 4.0     # metros
+TOL = 3.0          # simplificación de la traza, m
+PROF_TUNEL = 3.5   # metros bajo el andén
 
 
-# ------------------------------------------------------------------ geodesia
 def latlon_a_utm(lat, lon):
     phi, lam = math.radians(lat), math.radians(lon)
     N = A / math.sqrt(1.0 - E2 * math.sin(phi) ** 2)
@@ -97,22 +85,19 @@ def norm(s):
 def douglas_peucker(pts, tol):
     if len(pts) < 3:
         return pts
-    a, b = np.array(pts[0], dtype=float), np.array(pts[-1], dtype=float)
+    a, b = np.array(pts[0], float), np.array(pts[-1], float)
     ab = b - a
     n = np.linalg.norm(ab)
-    p = np.array(pts, dtype=float)
-    if n < 1e-9:
-        d = np.linalg.norm(p - a, axis=1)
-    else:
-        v = p - a
-        d = np.abs(ab[0] * v[:, 1] - ab[1] * v[:, 0]) / n
+    p = np.array(pts, float)
+    v = p - a
+    d = (np.linalg.norm(v, axis=1) if n < 1e-9
+         else np.abs(ab[0] * v[:, 1] - ab[1] * v[:, 0]) / n)
     i = int(np.argmax(d))
     if d[i] > tol:
         return douglas_peucker(pts[:i + 1], tol)[:-1] + douglas_peucker(pts[i:], tol)
     return [pts[0], pts[-1]]
 
 
-# ------------------------------------------------------------------ MMG1
 def leer_mmg(ruta):
     b = open(ruta, "rb").read()
     if b[:4] != b"MMG1":
@@ -146,7 +131,6 @@ def leer_cotas_png(ruta):
     return (v.astype(np.float64) / 10.0) - 1200.0
 
 
-# ------------------------------------------------------------------ GTFS
 def leer_gtfs(ruta):
     z = zipfile.ZipFile(ruta)
 
@@ -166,230 +150,285 @@ def leer_gtfs(ruta):
     return rutas, viajes, shapes, filas("stops.txt")
 
 
+# ------------------------------------------------------------------ encaje 2D
+def proyectar_en_traza(x, z, traza):
+    """Punto de la polilínea más cercano y su tangente (x,z normalizada)."""
+    a = traza[:-1]
+    ab = traza[1:] - a
+    l2 = (ab ** 2).sum(1)
+    l2[l2 == 0] = 1e-9
+    t = np.clip(((np.array([x, z]) - a) * ab).sum(1) / l2, 0, 1)
+    proj = a + ab * t[:, None]
+    d = np.linalg.norm(proj - np.array([x, z]), axis=1)
+    i = int(np.argmin(d))
+    tan = ab[i] / max(1e-9, np.linalg.norm(ab[i]))
+    return proj[i], tan, float(d[i])
+
+
+def rotar_planta(pts, centro, theta):
+    """Rota (x,z) alrededor de centro en planta; deja y intacta."""
+    c, s = math.cos(theta), math.sin(theta)
+    d = pts - centro
+    x = d[:, 0] * c - d[:, 2] * s
+    z = d[:, 0] * s + d[:, 2] * c
+    return np.stack([x, d[:, 1], z], 1) + centro
+
+
+def eje_largo(pts):
+    """Ángulo (x,z) del eje largo del modelo por PCA en planta."""
+    q = pts[:, [0, 2]]
+    q = q - q.mean(0)
+    cov = np.cov(q.T)
+    w, v = np.linalg.eigh(cov)
+    eje = v[:, int(np.argmax(w))]
+    return math.atan2(eje[1], eje[0])
+
+
 def main(linea):
     salida = os.path.join(RAIZ, "datos", "l" + linea if linea != "R" else "ramal")
     os.makedirs(salida, exist_ok=True)
 
     rutas_g, viajes, shapes, stops = leer_gtfs(os.path.join(DATOS_F, "gtfs", "metro.zip"))
-    ids_ruta = [k for k, v in rutas_g.items() if v.get("route_short_name") == linea]
-    if not ids_ruta:
-        raise SystemExit(f"línea {linea} no encontrada en routes.txt")
-    shapes_linea = {t["shape_id"] for t in viajes if t["route_id"] in ids_ruta}
-    color = "#" + (rutas_g[ids_ruta[0]].get("route_color") or "888888")
+    ids = [k for k, v in rutas_g.items() if v.get("route_short_name") == linea]
+    sids = {t["shape_id"] for t in viajes if t["route_id"] in ids}
+    color = "#" + (rutas_g[ids[0]].get("route_color") or "888888")
 
-    # ---- traza: una polilínea por shape, en metros locales y simplificada ----
-    rutas = []
-    for sid in sorted(shapes_linea):
-        pts = [a_local(lat, lon) for (_, lat, lon) in shapes[sid]]
-        simple = douglas_peucker(pts, TOLERANCIA_SIMPLIFICAR)
-        rutas.append({"l": linea, "shape": sid, "d": sid,
-                      "p": [[round(x, 1), 0.0, round(z, 1)] for (x, z) in simple]})
+    # ---- 1) UNA traza continua: encadenar los servicios por sus extremos ----
+    # El GTFS parte la L10 en dos servicios (sur y MetroNorte) con ida y vuelta
+    # cada uno. Superponerlos daba 13 cruces; encadenados son una sola línea de
+    # 38,2 km sin un solo cruce.
+    trozos = []
+    for s in sids:
+        p = [a_local(lat, lon) for (_, lat, lon) in shapes[s]]
+        L = sum(math.dist(p[i], p[i - 1]) for i in range(1, len(p)))
+        trozos.append((L, s, p))
+    trozos.sort(key=lambda t: -t[0])
 
-    # ---- estaciones del catálogo: nombre -> parada oficial ----
+    def cubierta(p, cadena, tol=40.0):
+        c = np.asarray(cadena)
+        idx = np.linspace(0, len(p) - 1, max(2, len(p) // 40)).astype(int)
+        n = sum(1 for i in idx
+                if np.min(np.hypot(c[:, 0] - p[i][0], c[:, 1] - p[i][1])) < tol)
+        return n / len(idx)
+
+    cadena = list(trozos[0][2])
+    usados = [trozos[0][1]]
+    for L, s, p in trozos[1:]:
+        if cubierta(p, cadena) > 0.5:
+            continue                            # es la vuelta de un tramo ya dibujado
+        if math.dist(p[-1], cadena[0]) < 400:
+            cadena = p + cadena
+        elif math.dist(p[0], cadena[-1]) < 400:
+            cadena = cadena + p
+        elif math.dist(p[0], cadena[0]) < 400:
+            cadena = p[::-1] + cadena
+        elif math.dist(p[-1], cadena[-1]) < 400:
+            cadena = cadena + p[::-1]
+        else:
+            continue
+        usados.append(s)
+    simple = douglas_peucker(cadena, TOL)
+    traza = np.asarray(simple, dtype=float)
+    print(f"traza: {' + '.join(usados)}  {len(cadena)} pts -> {len(simple)} tras simplificar  "
+          f"(descartadas {len(sids) - len(usados)} shapes duplicadas)")
+
+    # ---- 2) estaciones: stop -> punto de la traza ----
     red = json.load(open(os.path.join(DATOS_F, "red.json"), encoding="utf-8"))
     estaciones = [e for e in red["estaciones"] if linea in (e.get("l") or [])]
     por_nombre = {}
     for s in stops:
         por_nombre.setdefault(norm(s["stop_name"]), []).append(s)
 
-    sin_par = []
+    anclas = []
     for e in estaciones:
-        cand = por_nombre.get(norm(e["nombre"]))
-        if not cand:
-            sin_par.append(e["nombre"])
-            e["_delta"] = (0.0, 0.0)
+        cand_s = por_nombre.get(norm(e["nombre"]), [])
+        if not cand_s:
             continue
-        mejor = min(cand, key=lambda s: (a_local(float(s["stop_lat"]), float(s["stop_lon"]))[0] - e["xz"][0]) ** 2
-                                       + (a_local(float(s["stop_lat"]), float(s["stop_lon"]))[1] - e["xz"][1]) ** 2)
-        ax, az = a_local(float(mejor["stop_lat"]), float(mejor["stop_lon"]))
-        e["_delta"] = (ax - e["xz"][0], az - e["xz"][1])
-        e["xz"] = [round(ax, 2), round(az, 2)]
-        e["stop"] = mejor["stop_id"]
+        s = min(cand_s, key=lambda q: abs(a_local(float(q["stop_lat"]), float(q["stop_lon"]))[0] - e["xz"][0]))
+        sx, sz = a_local(float(s["stop_lat"]), float(s["stop_lon"]))
+        P, tan, dist = proyectar_en_traza(sx, sz, traza)
+        e["_P"] = (float(P[0]), float(P[1]))
+        e["_tan"] = (float(tan[0]), float(tan[1]))
+        e["_stop_dist"] = dist
+        e["stop"] = s["stop_id"]
+        e["xz"] = [round(float(P[0]), 2), round(float(P[1]), 2)]
+        e["tan"] = [round(float(tan[0]), 4), round(float(tan[1]), 4)]
+        e["giro"] = round(math.degrees(math.atan2(float(tan[1]), float(tan[0]))), 2)
+        anclas.append((e["nombre"], dist))
 
-    print(f"estaciones: {len(estaciones)}  sin parada oficial: {sin_par}")
-
-    # ---- corteza ----
-    tc = json.load(open(os.path.join(DATOS_F, "terreno.json"), encoding="utf-8"))
-    cotas = leer_cotas_png(os.path.join(DATOS_F, "terreno.png"))
-    nx_t, nz_t = tc["nx"], tc["nz"]
-
-    def cota_vec(xyz):
-        xyz = np.asarray(xyz, dtype=np.float64)
-        out = xyz.copy()
-        if len(xyz) == 0:
-            return out.astype(np.float32)
-        fx = np.clip((xyz[:, 0] - tc["x0"]) / tc["ancho"], 0, 1) * (nx_t - 1)
-        fz = np.clip((xyz[:, 2] - tc["z0"]) / tc["alto"], 0, 1) * (nz_t - 1)
-        i0 = np.clip(fx.astype(int), 0, nx_t - 2)
-        j0 = np.clip(fz.astype(int), 0, nz_t - 2)
-        dx, dz = fx - i0, fz - j0
-        a, b = cotas[j0, i0], cotas[j0, i0 + 1]
-        c, d = cotas[j0 + 1, i0], cotas[j0 + 1, i0 + 1]
-        out[:, 1] += (a * (1 - dx) + b * dx) * (1 - dz) + (c * (1 - dx) + d * dx) * dz
-        return out.astype(np.float32)
-
-    # ---- modelos: subconjunto + traslado al ancla de SU estación ----
+    # ---- 3) modelos: centro al punto de la traza + giro por PCA ----
     cab, pos, col, idx = leer_mmg(os.path.join(DATOS_F, "estaciones.bin"))
     por_code = {e["code"]: e for e in estaciones}
     partes_p, partes_c, partes_i, nuevas = [], [], [], []
     vo = io_ = 0
+    giros, residuos = [], []
     for m in cab["estaciones"]:
         e = por_code.get(m["code"])
-        if not e:
+        if not e or "_P" not in e:
             continue
-        dx, dz = e.get("_delta", (0.0, 0.0))
-        p = pos[m["v0"]:m["v0"] + m["vn"]].astype(np.float64)
-        p[:, 0] += dx
-        p[:, 2] += dz
-        p = cota_vec(p) if len(p) else p
+        v0, vn = m["v0"], m["vn"]
+        p = pos[v0:v0 + vn].astype(np.float64)
+        c_m = np.array([m["c"][0], 0.0, m["c"][2]])
+        ang_modelo = eje_largo(p)
+        ang_traza = math.atan2(e["_tan"][1], e["_tan"][0])
+        theta = ang_traza - ang_modelo
+        theta = (theta + math.pi / 2) % math.pi - math.pi / 2   # eje sin sentido: ±90°
+        p = rotar_planta(p, c_m, theta)
+        dp = np.array([e["_P"][0] - c_m[0], 0.0, e["_P"][1] - c_m[2]])
+        p = p + dp
+        centro = c_m + dp
+        giros.append(math.degrees(theta))
+        # residuo: eje del modelo ya girado vs tangente
+        ang_final = eje_largo(p)
+        dif = abs(((ang_final - ang_traza + math.pi / 2) % math.pi) - math.pi / 2)
+        residuos.append(math.degrees(dif))
+
         partes_p.append(p.astype(np.float32))
-        partes_c.append(col[m["v0"]:m["v0"] + m["vn"]])
-        partes_i.append(idx[m["i0"]:m["i0"] + m["in"]] - m["v0"] + vo)
+        partes_c.append(col[v0:v0 + vn])
+        partes_i.append(idx[m["i0"]:m["i0"] + m["in"]] - v0 + vo)
         m2 = dict(m)
         m2["v0"], m2["i0"] = vo, io_
-        cota_centro = float(cota_vec(np.array([[m["c"][0] + dx, 0.0, m["c"][2] + dz]]))[0][1])
-        m2["c"] = [round(float(m["c"][0] + dx), 2), round(cota_centro, 2), round(float(m["c"][2] + dz), 2)]
-        m2["pozo"] = [round(float(m["pozo"][0] + dx), 2), round(float(m["pozo"][1] + dz), 2)]
-        m2["pozo_y"] = round(float(m["pozo_y"] + cota_centro), 2)
+        m2["c"] = [round(float(centro[0]), 2), round(float(m["c"][1]), 2), round(float(centro[2]), 2)]
+        m2["pozo"] = [round(float(centro[0]), 2), round(float(centro[2]), 2)]
+        m2["pozo_y"] = round(float(m["pozo_y"]), 2)
+        m2["giro_deg"] = round(math.degrees(theta), 1)
         nuevas.append(m2)
-        vo += m["vn"]
+        vo += vn
         io_ += m["in"]
 
     pos2 = np.concatenate(partes_p) if partes_p else np.zeros((0, 3), np.float32)
     col2 = np.concatenate(partes_c) if partes_c else np.zeros((0, 3), np.uint8)
     idx2 = np.concatenate(partes_i) if partes_i else np.zeros(0, np.uint32)
 
-    # ---- andenes: trasladados con el delta de su estación + cota del DEM ----
+    # ---- 4) andenes: misma rotación y traslación que su modelo ----
     for e in estaciones:
-        dx, dz = e.get("_delta", (0.0, 0.0))
-        cota_est = float(cota_vec(np.array([[e["xz"][0], 0.0, e["xz"][1]]]))[0][1])
+        m = next((x for x in nuevas if x["code"] == e["code"]), None)
+        if m is None:
+            e["andenes"] = []
+            continue
+        # recomponer transformación desde el modelo original
+        orig = next((x for x in cab["estaciones"] if x["code"] == e["code"]), None)
+        c_m = np.array([orig["c"][0], 0.0, orig["c"][2]])
+        theta = math.radians(m["giro_deg"])
+        dp = np.array([e["_P"][0] - c_m[0], 0.0, e["_P"][1] - c_m[2]])
         nuevos = []
         for a in e["andenes"]:
             if a.get("l") != linea:
                 continue
-            path = np.asarray(a["path"], dtype=np.float64)
-            path[:, 0] += dx
-            path[:, 2] += dz
-            path = cota_vec(path)
+            path = np.asarray(a["path"], dtype=float)
+            path = rotar_planta(path, c_m, theta) + dp
+            path[:, 1] = a["y"]      # cota relativa del catálogo (0 = calle)
             a["path"] = path.round(2).tolist()
-            a["y"] = round(float(a["y"] + cota_est), 2)
+            a["y"] = round(float(a["y"]), 2)
             nuevos.append(a)
         e["andenes"] = nuevos
-        e.pop("_delta", None)
+        e["anden_y"] = round(float(min((a["y"] for a in nuevos), default=-16.0)), 2)
 
-    # ---- error de anclaje medido: cada estación contra la traza oficial ----
-    def dist_a_traza(x, z):
-        mejor = 1e9
-        q = np.array([x, z])
-        for r in rutas:
-            p = np.asarray([[t[0], t[2]] for t in r["p"]])
-            a = p[:-1]
-            ab = p[1:] - a
-            largo2 = (ab ** 2).sum(1)
-            largo2[largo2 == 0] = 1e-9
-            t = np.clip(((q - a) * ab).sum(1) / largo2, 0, 1)
-            proj = a + ab * t[:, None]
-            mejor = min(mejor, float(np.linalg.norm(proj - q, axis=1).min()))
-        return mejor
+    # ---- 5) perfil: el túnel va bajo el andén, relativo a la calle ----
+    profs = []
+    for e in estaciones:
+        if e.get("andenes"):
+            profs.append(min(a["y"] for a in e["andenes"]))
+    prof_por_defecto = float(np.median(profs)) if profs else -18.0
+    for e in estaciones:
+        e.pop("_tan", None)
+        e.pop("_stop_dist", None)
 
-    errores = [dist_a_traza(e["xz"][0], e["xz"][1]) for e in estaciones if "stop" in e]
+    def prof_en(x, z):
+        d = sorted(((math.hypot(x - e["_P"][0], z - e["_P"][1]), (min(a["y"] for a in e["andenes"])
+                                                                 if e["andenes"] else prof_por_defecto))
+                    for e in estaciones if "_P" in e), key=lambda t: t[0])[:2]
+        if not d:
+            return prof_por_defecto
+        w = [(1.0 / (t[0] + 40.0), t[1]) for t in d]
+        return sum(a * b for a, b in w) / sum(a for a, _ in w)
 
-    # ---- caja y corteza ----
-    xs = [p[0] for r in rutas for p in r["p"]]
-    zs = [p[2] for r in rutas for p in r["p"]]
+    ruta_p = []
+    for (x, z) in simple:
+        ruta_p.append([round(x, 1), round(prof_en(x, z) - PROF_TUNEL, 1), round(z, 1)])
+    rutas = [{"l": linea, "shape": "cadena", "d": "ida", "p": ruta_p}]
+
+    # ---- 6) caja, corteza y ortofoto (cotas absolutas solo para la textura) ----
+    xs = [p[0] for p in ruta_p]
+    zs = [p[2] for p in ruta_p]
     caja = {"x0": min(xs) - MARGEN_CAJA, "x1": max(xs) + MARGEN_CAJA,
             "z0": min(zs) - MARGEN_CAJA, "z1": max(zs) + MARGEN_CAJA}
+    tc = json.load(open(os.path.join(DATOS_F, "terreno.json"), encoding="utf-8"))
+    cotas = leer_cotas_png(os.path.join(DATOS_F, "terreno.png"))
+    nx_t, nz_t = tc["nx"], tc["nz"]
     nx = max(2, int(round((caja["x1"] - caja["x0"]) / PASO_MALLA)) + 1)
     nz = max(2, int(round((caja["z1"] - caja["z0"]) / PASO_MALLA)) + 1)
-    xs_m = np.linspace(caja["x0"], caja["x1"], nx)
-    zs_m = np.linspace(caja["z0"], caja["z1"], nz)
-    fx = np.clip((xs_m - tc["x0"]) / tc["ancho"], 0, 1) * (nx_t - 1)
-    fz = np.clip((zs_m - tc["z0"]) / tc["alto"], 0, 1) * (nz_t - 1)
-    malla = cotas[np.ix_(np.clip(np.round(fz).astype(int), 0, nz_t - 1),
-                         np.clip(np.round(fx).astype(int), 0, nx_t - 1))].astype(np.float32)
-    open(os.path.join(salida, "terreno.bin"), "wb").write(malla.tobytes())
+    fx = np.clip((np.linspace(caja["x0"], caja["x1"], nx) - tc["x0"]) / tc["ancho"], 0, 1) * (nx_t - 1)
+    fz = np.clip((np.linspace(caja["z0"], caja["z1"], nz) - tc["z0"]) / tc["alto"], 0, 1) * (nz_t - 1)
+    malla_abs = cotas[np.ix_(np.clip(np.round(fz).astype(int), 0, nz_t - 1),
+                             np.clip(np.round(fx).astype(int), 0, nx_t - 1))].astype(np.float32)
     meta_terreno = {"nx": nx, "nz": nz, "x0": caja["x0"], "x1": caja["x1"],
                     "z0": caja["z0"], "z1": caja["z1"], "h_ref": tc["h_ref"],
-                    "cota_min": float(malla.min()), "cota_max": float(malla.max()),
+                    "cota_min": float(malla_abs.min()), "cota_max": float(malla_abs.max()),
                     "paso_m": round((caja["x1"] - caja["x0"]) / (nx - 1), 1),
-                    "fuente": tc["fuente_dem"]}
+                    "modo": "plano", "fuente": tc["fuente_dem"]}
+    # el visor dibuja el suelo PLANO a 0; se guardan las cotas para el futuro
+    open(os.path.join(salida, "terreno.bin"), "wb").write(malla_abs.tobytes())
+    json.dump(meta_terreno, open(os.path.join(salida, "terreno.json"), "w", encoding="utf-8"),
+              ensure_ascii=False, indent=1)
 
-    # ---- traza con cota del DEM ----
-    for r in rutas:
-        r["p"] = cota_vec(np.asarray(r["p"], dtype=np.float64)).round(1).tolist()
+    orto = Image.open(os.path.join(DATOS_F, "ortofoto.jpg")).convert("RGB")
+    W, H = orto.size
+    px0 = int((caja["x0"] - tc["x0"]) / tc["ancho"] * W); px1 = int((caja["x1"] - tc["x0"]) / tc["ancho"] * W)
+    pz0 = int((caja["z0"] - tc["z0"]) / tc["alto"] * H); pz1 = int((caja["z1"] - tc["z0"]) / tc["alto"] * H)
+    recorte = orto.crop((max(0, px0), max(0, pz0), min(W, px1), min(H, pz1)))
+    recorte = recorte.resize((2048, int(recorte.height * 2048 / recorte.width)), Image.LANCZOS)
+    recorte.save(os.path.join(salida, "terreno.jpg"), quality=82, optimize=True)
 
-    # ---- perfil: el túnel va BAJO la calle, interpolando la profundidad de las
-    #      dos estaciones más cercanas (el GTFS no trae cota de vía) ----
-    anclas = []
-    for e in estaciones:
-        if not e.get("andenes"):
-            continue
-        calle = float(cota_vec(np.array([[e["xz"][0], 0.0, e["xz"][1]]]))[0][1])
-        prof = min(a["y"] for a in e["andenes"]) - calle
-        anclas.append((e["xz"][0], e["xz"][1], prof, e["nombre"]))
-    for r in rutas:
-        for p in r["p"]:
-            d = sorted(((math.hypot(p[0] - a[0], p[2] - a[1]), a[2]) for a in anclas),
-                       key=lambda t: t[0])[:2]
-            if not d:
-                p[1] = -18.0
-                continue
-            w = [(1.0 / (t[0] + 40.0), t[1]) for t in d]
-            tot = sum(x[0] for x in w)
-            prof = sum(x[0] * x[1] for x in w) / tot
-            calle = float(cota_vec(np.array([[p[0], 0.0, p[2]]]))[0][1])
-            p[1] = round(calle + prof - 3.5, 1)      # 3,5 m bajo el andén
-
-    long_km = sum(
-        sum(math.dist((r["p"][i][0], r["p"][i][2]), (r["p"][i - 1][0], r["p"][i - 1][2]))
-            for i in range(1, len(r["p"]))) for r in rutas) / 2 / 1000
+    # ---- 7) validación medida ----
+    tr = np.asarray([[p[0], p[2]] for p in ruta_p])
+    resid_est = []
+    for e in nuevas:
+        d = np.min(np.hypot(tr[:, 0] - e["c"][0], tr[:, 1] - e["c"][2]))
+        resid_est.append(float(d))
+    long_km = sum(math.dist((ruta_p[i][0], ruta_p[i][2]), (ruta_p[i - 1][0], ruta_p[i - 1][2]))
+                  for i in range(1, len(ruta_p))) / 1000
 
     sal = {"linea": linea, "color": color, "rutas": rutas, "estaciones": estaciones,
-           "caja": caja, "datum": "GTFS_CRTM_OFICIAL", "relieve": True,
-           "anclaje": "parada oficial de stops.txt por nombre"}
+           "caja": caja, "datum": "RELATIVO_CALLE_0", "plano": True,
+           "anclaje": "stop proyectado sobre la traza + giro PCA"}
     json.dump(sal, open(os.path.join(salida, "red.json"), "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"))
 
     cab2 = {"origen": cab["origen"], "datum": cab["datum"], "estaciones": nuevas,
             "vertices": int(len(pos2)), "triangulos": int(len(idx2) / 3),
-            "linea": linea, "fuente": "metro-gemelo/datos/estaciones.bin + ancla GTFS"}
+            "linea": linea, "modo": "plano, cota relativa a la calle",
+            "fuente": "metro-gemelo MMG1 + stop de stops.txt + giro PCA"}
     escribir_mmg(os.path.join(salida, "estaciones.bin"), cab2, pos2, col2, idx2)
 
-    json.dump(meta_terreno, open(os.path.join(salida, "terreno.json"), "w", encoding="utf-8"),
-              ensure_ascii=False, indent=1)
-
-    # ---- ortofoto recortada ----
-    orto = Image.open(os.path.join(DATOS_F, "ortofoto.jpg")).convert("RGB")
-    W, H = orto.size
-    px0 = int((caja["x0"] - tc["x0"]) / tc["ancho"] * W)
-    px1 = int((caja["x1"] - tc["x0"]) / tc["ancho"] * W)
-    pz0 = int((caja["z0"] - tc["z0"]) / tc["alto"] * H)
-    pz1 = int((caja["z1"] - tc["z0"]) / tc["alto"] * H)
-    recorte = orto.crop((max(0, px0), max(0, pz0), min(W, px1), min(H, pz1)))
-    recorte = recorte.resize((2048, int(recorte.height * 2048 / recorte.width)), Image.LANCZOS)
-    recorte.save(os.path.join(salida, "terreno.jpg"), quality=82, optimize=True)
-
     meta = {
-        "linea": linea, "color": color,
+        "linea": linea, "color": color, "plano": True,
         "estaciones": len(estaciones), "estaciones_con_modelo": len(nuevas),
         "andenes": sum(len(e["andenes"]) for e in estaciones),
-        "rutas": len(rutas), "puntos_traza": sum(len(r["p"]) for r in rutas),
+        "rutas": len(rutas), "puntos_traza": len(ruta_p),
+        "shapes_descartadas": len(sids) - len(usados),
         "longitud_km": round(long_km, 2),
         "vertices": int(len(pos2)), "triangulos": int(len(idx2) / 3),
-        "terreno": meta_terreno, "relieve": True,
-        "datum": "GTFS CRTM oficial (shapes/stops)",
-        "anclaje_error_m": {"mediana": round(float(np.median(errores)), 1),
-                            "p90": round(float(np.percentile(errores, 90)), 1),
-                            "max": round(float(max(errores)), 1)},
-        "sin_parada_oficial": sin_par,
-        "cota_anden_m": [round(min(a["y"] for e in estaciones for a in e["andenes"]), 1),
-                         round(max(a["y"] for e in estaciones for a in e["andenes"]), 1)]
-        if estaciones else None,
-        "fuente": "CRTM GTFS + modelos 20-nov-2026 (croquis) + DEM terrarium z13 + PNOA",
+        "terreno": meta_terreno,
+        "datum": "cotas relativas a la calle (0 = superficie)",
+        "centro_modelo_a_traza_m": {"mediana": round(float(np.median(resid_est)), 1),
+                                    "max": round(float(max(resid_est)), 1)},
+        "giro_modelo_deg": {"mediana": round(float(np.median(np.abs(giros))), 1),
+                            "max": round(float(max(np.abs(giros))), 1)},
+        "desalineacion_eje_deg": {"mediana": round(float(np.median(residuos)), 1),
+                                  "max": round(float(max(residuos)), 1)},
+        "stop_a_traza_m": {"mediana": round(float(np.median([d for _, d in anclas])), 1),
+                           "max": round(float(max(d for _, d in anclas)), 1)},
+        "profundidad_tunel_m": [round(float(min(p[1] for p in ruta_p)), 1),
+                                round(float(max(p[1] for p in ruta_p)), 1)],
+        "fuente": "CRTM GTFS + modelos 20-nov-2026 (croquis) + PNOA",
     }
     json.dump(meta, open(os.path.join(salida, "meta.json"), "w", encoding="utf-8"),
               ensure_ascii=False, indent=1)
-    print(json.dumps(meta, ensure_ascii=False, indent=1))
+    print(json.dumps({k: meta[k] for k in ("estaciones", "andenes", "puntos_traza", "longitud_km",
+                                           "centro_modelo_a_traza_m", "giro_modelo_deg",
+                                           "desalineacion_eje_deg", "profundidad_tunel_m")},
+                     ensure_ascii=False, indent=1))
     for f in ("red.json", "estaciones.bin", "terreno.bin", "terreno.jpg", "meta.json"):
         print(f"  {f:16s} {os.path.getsize(os.path.join(salida, f))/1024:8.1f} KB")
 

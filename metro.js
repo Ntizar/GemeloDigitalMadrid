@@ -26,11 +26,12 @@ const estado = {
   estaciones: true,
   tuneles: true,
   andenes: true,
+  croquis: false,
   etiquetas: true,
 };
 
 let escena, camara, renderer, transform;
-let corteza, grupoTuneles, grupoEstaciones, grupoAndenes, grupoPozos;
+let corteza, grupoTuneles, grupoEstaciones, grupoAndenes, grupoPozos, grupoEstacionesTraza;
 let datos = null;          // red.json
 let meta = null;           // meta.json
 let cab = null;            // cabecera MMG1
@@ -71,7 +72,7 @@ async function cargarCorteza(terrenoJson) {
       const x = x0 + (x1 - x0) * (i / (nx - 1));
       const k = j * nx + i;
       verts[k * 3] = x;
-      verts[k * 3 + 1] = h[k];
+      verts[k * 3 + 1] = 0;   // modo plano: el suelo comparte el 0 de los edificios y del metro
       verts[k * 3 + 2] = z;
       uvs[k * 2] = i / (nx - 1);
       uvs[k * 2 + 1] = 1 - j / (nz - 1);     // fila 0 de la imagen = z0
@@ -163,7 +164,7 @@ function montarRed(color) {
   const g = new THREE.Group();
   const col = new THREE.Color(color);
   const material = new THREE.MeshStandardMaterial({
-    color: col, emissive: col.clone().multiplyScalar(0.22), emissiveIntensity: 0.35,
+    color: col, emissive: col.clone().multiplyScalar(0.12), emissiveIntensity: 0.2,
     roughness: 0.38, metalness: 0.2, side: THREE.DoubleSide,
   });
   let tris = 0;
@@ -171,7 +172,7 @@ function montarRed(color) {
     const pts = [];
     for (let i = 0; i < r.p.length; i += 2) pts.push(r.p[i]);   // 1 punto de cada 2
     if (pts.length < 2) continue;
-    const geo = tuboPorRuta(pts, 4.4);
+    const geo = tuboPorRuta(pts, 3.0);
     const malla = new THREE.Mesh(geo, material);
     malla.frustumCulled = false;
     g.add(malla);
@@ -239,6 +240,71 @@ function montarEstaciones(mm) {
   return g;
 }
 
+
+/* Estaciones construidas SOBRE la traza: encaje por construcción.
+   Los modelos del catálogo son croquis de intercambiador casi cuadrados
+   (ratio 0,9, sin eje dominante), así que girarlos no los alinea: se ofrecen
+   como capa aparte ("croquis") y aquí se dibuja una estación a escala real. */
+function fusionar(geos) {
+  let nv = 0, ni = 0;
+  for (const g of geos) { nv += g.attributes.position.count; ni += g.index.count; }
+  const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3);
+  const idx = new Uint32Array(ni);
+  let vo = 0, io = 0;
+  for (const g of geos) {
+    pos.set(g.attributes.position.array, vo * 3);
+    nor.set(g.attributes.normal.array, vo * 3);
+    const gi = g.index.array;
+    for (let i = 0; i < gi.length; i++) idx[io + i] = gi[i] + vo;
+    vo += g.attributes.position.count;
+    io += gi.length;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeBoundingSphere();
+  return geo;
+}
+
+function cajaEstacion(w, h, d, x, y, z, theta) {
+  const g = new THREE.BoxGeometry(w, d, h);   // X largo, Y alto, Z ancho -> se gira en Y
+  g.rotateY(theta);
+  g.translate(x, y, z);
+  return g;
+}
+
+function montarEstacionesTraza() {
+  const andenes = [], naves = [], pozos = [];
+  for (const e of datos.estaciones) {
+    if (!e.tan || !e.xz) continue;
+    const [x, z] = e.xz;
+    const y = Number.isFinite(e.anden_y) ? e.anden_y : -16;
+    const theta = Math.atan2(-e.tan[1], e.tan[0]);   // eje X de la caja -> tangente
+    andenes.push(cajaEstacion(110, 1.0, 8, x, y, z, theta));
+    naves.push(cajaEstacion(118, 5.0, 18, x, y + 3.2, z, theta));
+    pozos.push(cajaEstacion(6, Math.abs(y) + 6, 6, x, (y + 6) / 2, z, theta));
+  }
+  const g = new THREE.Group();
+  const matAnden = new THREE.MeshStandardMaterial({
+    color: 0xd6e4f4, emissive: 0x1d2f45, emissiveIntensity: 0.5, roughness: 0.6, metalness: 0.05,
+  });
+  const matNave = new THREE.MeshStandardMaterial({
+    color: 0x8fb6d9, emissive: 0x14243a, emissiveIntensity: 0.55, roughness: 0.5, metalness: 0.15,
+  });
+  const matPozo = new THREE.MeshStandardMaterial({
+    color: 0x6f8aa6, emissive: 0x0e1a28, emissiveIntensity: 0.4, roughness: 0.7,
+  });
+  for (const [geos, mat] of [[andenes, matAnden], [naves, matNave], [pozos, matPozo]]) {
+    if (!geos.length) continue;
+    const m = new THREE.Mesh(fusionar(geos), mat);
+    m.frustumCulled = false;
+    m.renderOrder = 3;
+    g.add(m);
+  }
+  return g;
+}
+
 /* ------------------------------------------------ capa de MapLibre -------- */
 function capaMetro() {
   const mc = maplibregl.MercatorCoordinate.fromLngLat(ORIGEN, 0);
@@ -268,7 +334,8 @@ function capaMetro() {
       grupoTuneles = montarRed(datos.color);
       grupoAndenes = montarAndenes();
       grupoEstaciones = montarEstaciones(cab);
-      escena.add(grupoTuneles, grupoAndenes, grupoEstaciones);
+      grupoEstacionesTraza = montarEstacionesTraza();
+      escena.add(grupoTuneles, grupoAndenes, grupoEstacionesTraza, grupoEstaciones);
       if (corteza) escena.add(corteza);
       capaLista = true;
       aplicarVisibilidad();
@@ -297,11 +364,32 @@ function aplicarVisibilidad() {
   if (!capaLista) return;
   grupoTuneles.visible = estado.tuneles;
   grupoAndenes.visible = estado.andenes;
-  grupoEstaciones.visible = estado.estaciones;
+  grupoEstaciones.visible = estado.croquis;
+  grupoEstacionesTraza.visible = estado.estaciones;
   if (corteza) corteza.visible = estado.suelo > 0.02;
   const cont = $('etiquetas');
   if (cont) cont.hidden = !(estado.activo && estado.etiquetas);
   mapa.triggerRepaint();
+}
+
+/* etiquetas del mapa base: en modo subsuelo estorban (POIs encima del túnel) */
+let capasSimbolo = [];
+function ocultarEtiquetasBase(ocultar) {
+  if (!mapa.isStyleLoaded()) return;
+  if (ocultar) {
+    capasSimbolo = [];
+    for (const l of mapa.getStyle().layers) {
+      if (l.type === 'symbol' && mapa.getLayoutProperty(l.id, 'visibility') !== 'none') {
+        capasSimbolo.push(l.id);
+        mapa.setLayoutProperty(l.id, 'visibility', 'none');
+      }
+    }
+  } else {
+    for (const id of capasSimbolo) {
+      if (mapa.getLayer(id)) mapa.setLayoutProperty(id, 'visibility', 'visible');
+    }
+    capasSimbolo = [];
+  }
 }
 
 /* ------------------------------------------------ modo subsuelo ----------- */
@@ -309,6 +397,7 @@ function entrar() {
   if (!capaLista) return false;
   estado.activo = true;
   mapa.setTerrain(null);
+  ocultarEtiquetasBase(true);
   if (mapa.getLayer('edificios-3d')) {
     mapa.setPaintProperty('edificios-3d', 'fill-extrusion-opacity', estado.edificios);
   }
@@ -319,6 +408,7 @@ function entrar() {
 
 function salir() {
   estado.activo = false;
+  ocultarEtiquetasBase(false);
   const quiereTerreno = $('chk-terreno') ? $('chk-terreno').checked : false;
   if (quiereTerreno && mapa.getSource('terreno-dem')) {
     mapa.setTerrain({ source: 'terreno-dem', exaggeration: 1.25 });
@@ -426,6 +516,7 @@ async function arrancar() {
       info: () => ({
         activo: estado.activo, capa: !!mapa.getLayer('metro3d'),
         tuneles: grupoTuneles ? grupoTuneles.children.length : 0,
+        estacionesTraza: grupoEstacionesTraza ? grupoEstacionesTraza.children.length : 0,
         estaciones: cab ? cab.header.estaciones.length : 0,
         tris: renderer ? renderer.info.render.triangles : 0,
         llamadas: renderer ? renderer.info.render.calls : 0,
@@ -464,7 +555,7 @@ function conectar() {
     aplicarVisibilidad();
   });
 
-  for (const [id, clave] of [['chk-est', 'estaciones'], ['chk-tun', 'tuneles'], ['chk-and', 'andenes'], ['chk-etq', 'etiquetas']]) {
+  for (const [id, clave] of [['chk-est', 'estaciones'], ['chk-tun', 'tuneles'], ['chk-and', 'andenes'], ['chk-etq', 'etiquetas'], ['chk-croquis', 'croquis']]) {
     const el = $(id);
     if (el) el.addEventListener('change', () => { estado[clave] = el.checked; aplicarVisibilidad(); pintarEtiquetas(); });
   }
