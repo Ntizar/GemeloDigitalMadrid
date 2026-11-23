@@ -1,0 +1,28 @@
+{
+ "estaciones": 242,
+ "modelos": 240,
+ "tramos": 560,
+ "lineas": [
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "R",
+  "10",
+  "11",
+  "12"
+ ],
+ "accesos": 482,
+ "estaciones_con_acceso": 214,
+ "vertices": 352013,
+ "triangulos": 408103,
+ "bytes": {
+  "red": 1412849,
+  "bin": 10224288
+ }
+}

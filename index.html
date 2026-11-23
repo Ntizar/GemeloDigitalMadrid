@@ -65,6 +65,10 @@
   input[type=range]::-webkit-slider-thumb{appearance:none;width:13px;height:13px;
     border-radius:50%;background:var(--acento);cursor:pointer;border:0}
   input[type=range]::-moz-range-thumb{width:13px;height:13px;border:0;border-radius:50%;background:var(--acento)}
+  .chips{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0 6px}
+  .chip-l{font:600 10.5px/1 var(--mono);padding:5px 7px;border-radius:7px;cursor:pointer;
+    background:rgba(148,163,184,.10);color:var(--texto);border:1px solid var(--borde)}
+  .chip-l.is-on{background:rgba(56,189,248,.18);border-color:rgba(56,189,248,.7)}
   #metro-ctrl .fila>span{font-family:var(--mono);font-size:10px;color:var(--tenue);min-width:32px;text-align:right}
   #etiquetas{position:fixed;inset:0;pointer-events:none;z-index:4}
   .etq-est{position:absolute;left:0;top:0;margin:-15px 0 0 9px;
@@ -142,29 +146,26 @@
       medido edificio a edificio.</p>
 
     <div class="sub">
-      <div class="fila"><label for="chk-metro"><b>Metro L10 bajo tierra</b></label>
+      <div class="fila"><label for="chk-metro"><b>Metro bajo tierra</b></label>
         <input id="chk-metro" type="checkbox" disabled></div>
-      <div id="metro-cifras">Cargando la línea 10…</div>
-      <div id="metro-ctrl">
-        <div class="fila"><label for="r-edif">Edificios</label><span id="v-edif">14 %</span>
-          <input id="r-edif" type="range" min="0" max="94" value="14"></div>
-        <div class="fila"><label for="r-suelo">Suelo</label><span id="v-suelo">78 %</span>
-          <input id="r-suelo" type="range" min="0" max="100" value="78"></div>
-        <div class="fila"><label for="chk-croquis">Croquis del catálogo</label>
-          <input id="chk-croquis" type="checkbox" checked></div>
-        <div class="fila"><label for="chk-tun">Túneles</label>
-          <input id="chk-tun" type="checkbox" checked></div>
-        <div class="fila"><label for="chk-and">Andenes</label>
-          <input id="chk-and" type="checkbox" checked></div>
-        <div class="fila"><label for="chk-etq">Etiquetas</label>
-          <input id="chk-etq" type="checkbox" checked></div>
-        <div class="vistas">
-          <button id="b-l10">Toda la L10</button><button id="b-nm">N. Ministerios</button>
-          <button id="b-tribunal">Tribunal</button><button id="b-chamartin">Chamartín</button>
-        </div>
+      <div id="metro-cifras">Cargando la red…</div>
+      <div id="chips-linea" class="chips"></div>
+      <div class="fila"><label for="r-edif">Edificios</label><span id="v-edif">10 %</span>
+        <input id="r-edif" type="range" min="0" max="94" value="10"></div>
+      <div class="fila"><label for="chk-est">Modelos 3D</label>
+        <input id="chk-est" type="checkbox" checked></div>
+      <div class="fila"><label for="chk-tun">Túneles</label>
+        <input id="chk-tun" type="checkbox" checked></div>
+      <div class="fila"><label for="chk-acc">Accesos</label>
+        <input id="chk-acc" type="checkbox" checked></div>
+      <div class="fila"><label for="chk-etq">Etiquetas</label>
+        <input id="chk-etq" type="checkbox" checked></div>
+      <div class="vistas">
+        <button id="b-red">Toda la red</button><button id="b-nm">N. Ministerios</button>
+        <button id="b-tribunal">Tribunal</button><button id="b-castilla">Castilla</button>
       </div>
-      <p id="metro-nota">Modo subsuelo: apaga el terreno y deja <b>suelo y edificios</b> translúcidos.
-        Prueba con la <b>L10</b>: 31 estaciones con modelo, 64 andenes y 38 km de túnel.</p>
+      <p id="metro-nota">Red completa: 13 líneas, 242 estaciones y las <b>482 bocas de acceso</b>
+        del CRTM, cada una en su punto. El terreno se apaga para ver el subsuelo.</p>
     </div>
   </div>
 </aside>
