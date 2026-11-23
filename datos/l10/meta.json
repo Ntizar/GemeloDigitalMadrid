@@ -1,51 +1,22 @@
 {
  "linea": "10",
- "color": "#005AA9",
- "plano": true,
  "estaciones": 31,
  "estaciones_con_modelo": 31,
- "andenes": 64,
- "rutas": 1,
- "puntos_traza": 197,
- "shapes_descartadas": 2,
- "longitud_km": 38.33,
+ "andenes": 92,
+ "rutas_v19": 60,
+ "puntos_traza": 2889,
+ "longitud_km": 38.24,
  "vertices": 128786,
- "triangulos": 88427,
- "terreno": {
-  "nx": 167,
-  "nz": 217,
-  "x0": -11457.1,
-  "x1": 10144.1,
-  "z0": -18022.2,
-  "z1": 10065.0,
-  "h_ref": 660.5,
-  "cota_min": -109.5,
-  "cota_max": 108.4000015258789,
-  "paso_m": 130.1,
-  "modo": "plano",
-  "fuente": "AWS terrain-tiles (terrarium) z13 ~14,6 m/px"
+ "triangulos": 118103,
+ "centro_estacion_a_traza_m": {
+  "mediana": 2.5,
+  "max": 85.0
  },
- "datum": "cotas relativas a la calle (0 = superficie)",
- "centro_modelo_a_traza_m": {
-  "mediana": 4.9,
-  "max": 101.2
+ "puerto_a_traza_m": {
+  "mediana": 2.2,
+  "p90": 56.9,
+  "max": 268.2
  },
- "giro_modelo_deg": {
-  "mediana": 6.4,
-  "max": 191.0
- },
- "anden_a_traza_m": {
-  "mediana": 4.7,
-  "p90": 13.5,
-  "max": 83.6
- },
- "stop_a_traza_m": {
-  "mediana": 18.2,
-  "max": 121.4
- },
- "profundidad_tunel_m": [
-  -21.5,
-  -12.6
- ],
- "fuente": "CRTM GTFS + modelos 20-nov-2026 (croquis) + PNOA"
+ "fuente": "catalogo V19 con poses rigidas + GLB originales",
+ "aviso": "poses APPROXIMATE (rms ~20 m), no levantamiento"
 }

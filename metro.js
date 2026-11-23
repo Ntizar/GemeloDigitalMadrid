@@ -334,8 +334,7 @@ function capaMetro() {
       grupoTuneles = montarRed(datos.color);
       grupoAndenes = montarAndenes();
       grupoEstaciones = montarEstaciones(cab);
-      grupoEstacionesTraza = montarEstacionesTraza();
-      escena.add(grupoTuneles, grupoAndenes, grupoEstacionesTraza, grupoEstaciones);
+      escena.add(grupoTuneles, grupoAndenes, grupoEstaciones);
       if (corteza) escena.add(corteza);
       capaLista = true;
       aplicarVisibilidad();
@@ -364,7 +363,6 @@ function aplicarVisibilidad() {
   if (!capaLista) return;
   grupoTuneles.visible = estado.tuneles;
   grupoAndenes.visible = estado.andenes;
-  grupoEstacionesTraza.visible = estado.estaciones;
   grupoEstaciones.visible = estado.croquis;
   if (corteza) corteza.visible = estado.suelo > 0.02;
   const cont = $('etiquetas');
@@ -496,7 +494,7 @@ async function arrancar() {
       salir: () => { if ($('chk-metro')) $('chk-metro').checked = false; salir(); },
       volar,
       diag: () => {
-        const b = new THREE.Box3().setFromObject(grupoEstacionesTraza);
+        const b = new THREE.Box3().setFromObject(grupoEstaciones);
         const b2 = new THREE.Box3().setFromObject(grupoTuneles);
         const b3 = corteza ? new THREE.Box3().setFromObject(corteza) : null;
         const r = (v) => v.toArray().map((n) => +n.toFixed(1));
@@ -516,7 +514,7 @@ async function arrancar() {
       info: () => ({
         activo: estado.activo, capa: !!mapa.getLayer('metro3d'),
         tuneles: grupoTuneles ? grupoTuneles.children.length : 0,
-        estacionesTraza: grupoEstacionesTraza ? grupoEstacionesTraza.children.length : 0,
+        estacionesTraza: 0,
         estaciones: cab ? cab.header.estaciones.length : datos.estaciones.length,
         tris: renderer ? renderer.info.render.triangles : 0,
         llamadas: renderer ? renderer.info.render.calls : 0,
