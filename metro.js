@@ -84,22 +84,49 @@ function tuboPorRuta(puntos, radio) {
   return geo;
 }
 
+function fusionar(geos) {
+  let nv = 0, ni = 0;
+  for (const g of geos) { nv += g.attributes.position.count; ni += g.index.count; }
+  const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3);
+  const idx = new Uint32Array(ni);
+  let vo = 0, io = 0;
+  for (const g of geos) {
+    pos.set(g.attributes.position.array, vo * 3);
+    nor.set(g.attributes.normal.array, vo * 3);
+    const gi = g.index.array;
+    for (let i = 0; i < gi.length; i++) idx[io + i] = gi[i] + vo;
+    vo += g.attributes.position.count; io += gi.length;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  return geo;
+}
+
 function montarRed() {
   const g = new THREE.Group();
   const colores = new Map(datos.lineas.map((l) => [l.ref, l.color]));
-  let tris = 0;
+  const porL = new Map();
   for (const r of datos.rutas) {
     if (!r.p || r.p.length < 2) continue;
-    const col = new THREE.Color(colores.get(r.l) || '#8a92a0');
+    if (!porL.has(r.l)) porL.set(r.l, []);
+    porL.get(r.l).push(tuboPorRuta(r.p, 2.6));
+  }
+  let tris = 0;
+  for (const [ref, geos] of porL) {
+    const col = new THREE.Color(colores.get(ref) || '#8a92a0');
     const mat = new THREE.MeshStandardMaterial({
       color: col, emissive: col.clone().multiplyScalar(0.10), emissiveIntensity: 0.22,
       roughness: 0.4, metalness: 0.2,
     });
-    const sub = g.getObjectByName('L' + r.l) || (() => { const o = new THREE.Group(); o.name = 'L' + r.l; g.add(o); return o; })();
-    const geo = tuboPorRuta(r.p, 2.6);
+    const geo = fusionar(geos);
     const m = new THREE.Mesh(geo, mat);
     m.frustumCulled = false;
-    sub.add(m);
+    const o = new THREE.Group();
+    o.name = 'L' + ref;
+    o.add(m);
+    g.add(o);
     tris += geo.index.count / 3;
   }
   g.userData.tris = tris;
@@ -288,6 +315,7 @@ function crearEtiquetas() {
 
 function pintarEtiquetas() {
   if (!estado.activo || !estado.etiquetas) return;
+  if (mapa.getZoom() < 14.2) { for (const e of etiquetas) e.el.style.display = 'none'; return; }
   const W = mapa.getCanvas().clientWidth, H = mapa.getCanvas().clientHeight;
   for (const e of etiquetas) {
     const p = mapa.project(e.lonlat);
