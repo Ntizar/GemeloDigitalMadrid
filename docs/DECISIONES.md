@@ -75,17 +75,25 @@ Trampas pagadas aquí:
   se lee como una cinta pintada. Se interpola la profundidad entre las dos estaciones más cercanas:
   resultado medido, **−20,4 m de mediana** respecto al terreno (rango −9,0 a −26,6).
 
-### El dato: el catálogo estaba 1,5 km desplazado
+### El dato: el catálogo está en OTRO MARCO, no desplazado
 
-`metro-gemelo/datos/red.json` (catálogo resuelto) está **desplazado ~1,5 km al suroeste** respecto al
-GTFS oficial y tiene **±200 m de dispersión propia** (31 estaciones de la L10 emparejadas con
-`stops.txt`: traslación media +693 / −1.402 m, residuo mediano 58 m, máximo 232 m). Su README declara
-«error mediano 2,6 m», pero eso mide coherencia con **su propio eje**, no con la ciudad.
+El catálogo viene de un visor de referencia (`explorar.html`) con su propio origen declarado:
 
-Por eso `scripts/hornear_metro.py` **no usa las x/z del catálogo**: reconstruye la traza del
-`shapes.txt` oficial y ancla cada estación a su parada de `stops.txt` por nombre. Recibo tras el
-cambio (31 estaciones contra OSM): Tribunal 88 m, Nuevos Ministerios 63 m, Chamartín 0 m, Casa de
-Campo 3 m, Príncipe Pío 9 m.
+```
+origin_epsg25830 = [440979.959, 4475676]     # 689 m al E y 1.421 m al N de la Puerta del Sol
+```
+
+Por eso sus x/z parecían estar «1,5 km al suroeste»: se estaban leyendo como relativas a Sol. **No era
+un error del dato, era un cambio de marco.** Con el origen correcto, las 31 estaciones de la L10 caen a
+59-263 m de su posición real (el catálogo declara `APPROXIMATE`, rms ~20 m; no es un levantamiento).
+
+Ese mismo visor publica **poses rígidas ya ajustadas** por modelo (`matrix_xz`, `translation_xz`,
+`translation_y`, `scale_xyz`). El horno `scripts/hornear_metro_v19.py` las aplica directamente a los
+GLB originales y pasa todo al marco del gemelo; la traza son los 60 tramos dirigidos del propio
+catálogo (2.889 puntos, 38,24 km). Recibo: **centro de estación a traza, mediana 2,5 m** (máx 85 m).
+
+La lección: **antes de declarar «el dato está mal», busca su origen y su marco**. Y si el proveedor
+publica poses, úsalas: recalcularlas por PCA es peor que no girar nada.
 
 ## 6. Siguiente escalón, con su coste
 

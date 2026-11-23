@@ -52,7 +52,7 @@ dibuja la línea a su cota real. Dos deslizadores (edificios y suelo) abren o ci
 |---|---|---|
 | Traza | GTFS oficial del CRTM (`shapes.txt`), simplificada a 4 m | 4 trazas · 350 puntos · **38,23 km** |
 | Anclaje de estaciones | `stops.txt` por nombre | 31/31 · error mediano **17 m** al eje |
-| Estaciones 3D | modelos del catálogo, trasladados a su parada | **118.103 triángulos** en 1 llamada |
+| Estaciones 3D | GLB originales con la **pose del catálogo V19** | **118.103 triángulos** · centro a traza **2,5 m** |
 | Andenes | catálogo funcional | **64** andenes |
 | Corteza | DEM terrarium + ortofoto PNOA recortada | 172 × 222 cotas · 1 MB de textura |
 | Perfil de vía | interpolado entre las dos estaciones más cercanas | **−20,4 m** de mediana bajo el terreno |
@@ -64,10 +64,10 @@ Tres cosas que hay que saber antes de tocar esto:
   el subsuelo no se ve (0 px medidos); el modo subsuelo apaga el terreno y pone su propia corteza.
 - **El GTFS no trae cota de vía.** Se interpola la profundidad entre estaciones; sin eso el túnel se
   dibuja a ras de calle y parece una cinta pintada.
-- **Se regenera con** `python scripts/hornear_metro.py 10` (lee de `../metro-gemelo`; `METRO_GEMELO=`
-  para otra ruta). Ojo: el `red.json` de `metro-gemelo` está **~1,5 km desplazado** respecto al GTFS
-  oficial, por eso el horneador reconstruye la traza desde `shapes.txt` y ancla por `stops.txt`.
-  Detalle y cifras: [`docs/DECISIONES.md`](docs/DECISIONES.md) §5.
+- **Se regenera con** `python scripts/hornear_metro_v19.py 10`. Usa el catálogo V19 (poses rígidas por
+  modelo) y su propio marco: `origin_epsg25830 = [440979.959, 4475676]`, que **no** es la Puerta del
+  Sol (689 m al E y 1.421 m al N). Leer sus x/z como relativas a Sol es lo que hacía parecer que el
+  catálogo estaba «1,5 km desplazado». Detalle y cifras: [`docs/DECISIONES.md`](docs/DECISIONES.md) §5.
 
 ## Hoja de ruta
 
